@@ -4,7 +4,4 @@
 
 
 
-* The App costs $5 on app store and is and will remain to be free for ever.
-
-
 
