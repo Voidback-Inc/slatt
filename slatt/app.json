@@ -13,7 +13,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.voidback.slatt",
       "buildNumber": "1",
-      "version": "1.0.0",
+      "version": "1.0.2",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -51,7 +51,6 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "8b9acf4f-451a-41a2-91fa-26344bce720b"
       }
     },
     "owner": "voidback-inc"
