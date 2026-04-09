@@ -85,8 +85,8 @@ function VideoPreviewScreen({ media, onDiscard, onSave, saving }) {
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       <VideoView
         player={player}
-        style={StyleSheet.absoluteFillObject}
-        contentFit="cover"
+        style={[StyleSheet.absoluteFillObject, { transform: [{ scaleX: -1 }] }]}
+        contentFit="contain"
         nativeControls={false}
       />
 
@@ -117,7 +117,7 @@ function VideoPreviewScreen({ media, onDiscard, onSave, saving }) {
         >
           {saving
             ? <ActivityIndicator size="small" color={T.saveText} />
-            : <Lock size={16} color={T.saveText} strokeWidth={2.5} />
+            : <Lock size={16} color={"white"} strokeWidth={2.5} />
           }
           <Text style={styles.saveTxt}>{saving ? 'Saving…' : 'Save'}</Text>
         </TouchableOpacity>
@@ -148,7 +148,7 @@ function PhotoPreviewScreen({ media, onDiscard, onSave, saving }) {
         >
           {saving
             ? <ActivityIndicator size="small" color={T.saveText} />
-            : <Lock size={16} color={T.saveText} strokeWidth={2.5} />
+            : <Lock size={16} color={"white"} strokeWidth={2.5} />
           }
           <Text style={styles.saveTxt}>{saving ? 'Saving…' : 'Save'}</Text>
         </TouchableOpacity>
@@ -227,10 +227,10 @@ const styles = StyleSheet.create({
   },
   saveBtn: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: T.saveBg, paddingHorizontal: 32, paddingVertical: 14,
-    borderRadius: 4, gap: 8,
+    backgroundColor: T.surface, paddingHorizontal: 32, paddingVertical: 14,
+    borderRadius: 100, gap: 8
   },
-  saveTxt: { color: T.saveText, fontSize: 15, fontWeight: '700', letterSpacing: 0.4 },
+  saveTxt: { color: "white", fontSize: 15, fontWeight: '700', letterSpacing: 0.4 },
 });
 
 const HOLD_MS = 250;

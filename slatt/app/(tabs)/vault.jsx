@@ -74,15 +74,29 @@ async function reAuthenticate() {
       LocalAuthentication.hasHardwareAsync(),
       LocalAuthentication.isEnrolledAsync(),
     ]);
+
+    // If no hardware or nothing enrolled, don't even try biometric-only
+    if (!hw || !enrolled) return false;
+
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: 'Confirm your identity to save',
-      fallbackLabel: 'Use Passcode',
       cancelLabel: 'Cancel',
-      disableDeviceFallback: false,
-      ...(hw && enrolled ? { biometricsSecurityLevel: 'strong' } : {}),
+
+      // 1. Set this to true to prevent PIN/Passcode fallback
+      disableDeviceFallback: true,
+
+      // 2. Set to empty string to hide the fallback button on iOS
+      fallbackLabel: '',
+
+      // Ensure we are requesting strong biometrics
+      biometricsSecurityLevel: 'strong',
     });
+
     return result.success;
-  } catch { return false; }
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,7 +264,7 @@ function VideoLightbox({ item, onClose, onDelete }) {
 
         {/* Video */}
         <TouchableWithoutFeedback onPress={togglePlay}>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, transform: [{ scaleX: -1 }] }}>
             <VideoView
               player={player}
               style={StyleSheet.absoluteFillObject}
@@ -718,7 +732,7 @@ export default function MediaVaultScreen() {
       ]);
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Unlock your vault',
-        fallbackLabel: 'Use Passcode',
+        fallbackLabel: '',
         cancelLabel: 'Cancel',
         disableDeviceFallback: false,
         ...(hw && enrolled ? { biometricsSecurityLevel: 'strong' } : {}),
