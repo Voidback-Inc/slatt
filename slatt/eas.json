@@ -1,0 +1,21 @@
+{
+  "build": {
+    "production": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "env": {
+        "ENV": "production"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "companyName": "Voidback, Inc."
+      }
+    }
+  },
+  "cli": {
+    "appVersionSource": "remote"
+  }
+}
