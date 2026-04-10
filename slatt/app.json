@@ -3,7 +3,7 @@
     "name": "Slatt",
     "sdkVersion": "54.0.0",
     "slug": "slatt",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "slatt",
@@ -13,7 +13,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.voidback.slatt",
       "buildNumber": "1",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
