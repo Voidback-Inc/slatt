@@ -38,7 +38,7 @@ const COMPANY = 'Voidback, Inc.';
 const STATE = 'Delaware';
 const YEAR = '2026';
 const APP = 'slatt';
-const OPENSOURCE = "https://github.com/24greyhat/slattApp";
+const OPENSOURCE = "https://github.com/Voidback-Inc/slatt";
 
 
 const PRIVACY_POLICY = `Last updated: January 1, ${YEAR}
