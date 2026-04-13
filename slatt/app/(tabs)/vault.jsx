@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -65,36 +65,83 @@ async function loadMediaFiles() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RE-AUTH HELPER — called before any destructive / export action
+// BIOMETRIC AUTH HELPERS
+//
+// POLICY: slatt enforces Face ID / Touch ID only.
+//   - Passcode fallback is ALWAYS disabled (disableDeviceFallback: true).
+//   - fallbackLabel: '' hides the "Use Passcode" button on iOS entirely.
+//   - If the device has no enrolled biometrics, we show a clear error rather
+//     than silently falling through to a less-secure method.
+//
+// This applies to both vault unlock and the re-auth before exporting to Photos.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function reAuthenticate() {
-  try {
-    const [hw, enrolled] = await Promise.all([
-      LocalAuthentication.hasHardwareAsync(),
-      LocalAuthentication.isEnrolledAsync(),
-    ]);
+/**
+ * Returns true if the device has biometric hardware AND at least one
+ * Face ID / Touch ID credential enrolled. Returns false otherwise.
+ */
+async function biometricsAvailable() {
+  const [hw, enrolled] = await Promise.all([
+    LocalAuthentication.hasHardwareAsync(),
+    LocalAuthentication.isEnrolledAsync(),
+  ]);
+  return hw && enrolled;
+}
 
-    // If no hardware or nothing enrolled, don't even try biometric-only
-    if (!hw || !enrolled) return false;
+/**
+ * Vault unlock — called every time the vault screen mounts.
+ *
+ * promptMessage is shown in the system Face ID / Touch ID sheet.
+ * We describe exactly what we're protecting and why, so the user
+ * understands the purpose before authenticating.
+ *
+ * Returns: 'ok' | 'no_biometrics' | 'cancelled' | 'failed'
+ */
+async function vaultUnlockAuth() {
+  try {
+    if (!(await biometricsAvailable())) return 'no_biometrics';
 
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Confirm your identity to save',
+      // Purpose string — shown in the Face ID / Touch ID system sheet.
+      // Clearly states what is being protected and that no data leaves the device.
+      promptMessage: 'slatt uses Face ID to protect your private vault. Your media is stored only on this device and is never uploaded or shared.',
+      fallbackLabel: '',     // hides "Use Passcode" on iOS
       cancelLabel: 'Cancel',
+      disableDeviceFallback: true,   // passcode fallback completely disabled
+      biometricsSecurityLevel: 'strong',
+    });
 
-      // 1. Set this to true to prevent PIN/Passcode fallback
-      disableDeviceFallback: true,
+    if (result.success) return 'ok';
+    if (result.error === 'user_cancel') return 'cancelled';
+    return 'failed';
+  } catch {
+    return 'failed';
+  }
+}
 
-      // 2. Set to empty string to hide the fallback button on iOS
+/**
+ * Re-authentication before exporting a file to the Photos library.
+ *
+ * Separate prompt so the user knows specifically why they're being asked again.
+ * Passcode fallback disabled — same policy as vault unlock.
+ *
+ * Returns true on success, false otherwise.
+ */
+async function reAuthenticate() {
+  try {
+    if (!(await biometricsAvailable())) return false;
+
+    const result = await LocalAuthentication.authenticateAsync({
+      // Purpose string — explains why a second biometric check is needed.
+      promptMessage: 'Confirm with Face ID to save this item to your Photos library. slatt never uploads your media; this confirmation keeps your vault secure.',
       fallbackLabel: '',
-
-      // Ensure we are requesting strong biometrics
+      cancelLabel: 'Cancel',
+      disableDeviceFallback: true,
       biometricsSecurityLevel: 'strong',
     });
 
     return result.success;
-  } catch (error) {
-    console.error(error);
+  } catch {
     return false;
   }
 }
@@ -104,14 +151,19 @@ async function reAuthenticate() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function downloadToPhotos(uri) {
-  // 1. Re-auth
+  // 1. Re-auth (biometric only)
   const authed = await reAuthenticate();
   if (!authed) return;
 
-  // 2. Media library permission
+  // 2. Request Photos permission — purpose string shown in system alert.
+  //    iOS uses the NSPhotoLibraryAddUsageDescription key in Info.plist for the
+  //    system-level string; this alert provides additional context inside the app.
   const { status } = await MediaLibrary.requestPermissionsAsync();
   if (status !== 'granted') {
-    Alert.alert('Permission denied', 'Allow access to Photos to save media.');
+    Alert.alert(
+      'Photos Access Required',
+      'slatt needs write access to your Photos library to save this item. Your vault media stays on-device — this permission is only used when you explicitly choose to export.',
+    );
     return;
   }
 
@@ -136,7 +188,7 @@ const fmtTime = s => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VIDEO LIGHTBOX — custom controls, scrubber, download
+// VIDEO LIGHTBOX
 // ─────────────────────────────────────────────────────────────────────────────
 
 function VideoLightbox({ item, onClose, onDelete }) {
@@ -164,34 +216,26 @@ function VideoLightbox({ item, onClose, onDelete }) {
     Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }).start();
   }, []);
 
-  // Duration
   useEffect(() => {
     const sub = player.addListener('statusChange', () => {
       const d = player.duration ?? 0;
-      if (d > 0 && durationRef.current === 0) {
-        durationRef.current = d;
-        setDuration(d);
-      }
+      if (d > 0 && durationRef.current === 0) { durationRef.current = d; setDuration(d); }
     });
     return () => sub.remove();
   }, [player]);
 
-  // Progress poll
   useEffect(() => {
     const id = setInterval(() => {
       if (scrubRef.current) return;
       const t = player.currentTime ?? 0;
       setCurrentTime(t);
       if (durationRef.current > 0 && t >= durationRef.current - 0.1) {
-        player.currentTime = 0;
-        player.pause();
-        setIsPlaying(false);
+        player.currentTime = 0; player.pause(); setIsPlaying(false);
       }
     }, 100);
     return () => clearInterval(id);
   }, [player]);
 
-  // Mute sync
   useEffect(() => { player.muted = isMuted; }, [isMuted, player]);
 
   const showControls = () => {
@@ -218,27 +262,18 @@ function VideoLightbox({ item, onClose, onDelete }) {
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: e => {
-      scrubRef.current = true;
-      setScrubbing(true);
-      player.pause();
+      scrubRef.current = true; setScrubbing(true); player.pause();
       const x = Math.min(SCRUB_W, Math.max(0, e.nativeEvent.locationX));
-      const ratio = x / SCRUB_W;
-      const t = ratio * durationRef.current;
-      player.currentTime = t;
-      setCurrentTime(t);
+      const t = (x / SCRUB_W) * durationRef.current;
+      player.currentTime = t; setCurrentTime(t);
     },
     onPanResponderMove: e => {
       const x = Math.min(SCRUB_W, Math.max(0, e.nativeEvent.locationX));
-      const ratio = x / SCRUB_W;
-      const t = ratio * durationRef.current;
-      player.currentTime = t;
-      setCurrentTime(t);
+      const t = (x / SCRUB_W) * durationRef.current;
+      player.currentTime = t; setCurrentTime(t);
     },
     onPanResponderRelease: () => {
-      scrubRef.current = false;
-      setScrubbing(false);
-      player.play();
-      setIsPlaying(true);
+      scrubRef.current = false; setScrubbing(false); player.play(); setIsPlaying(true);
     },
   })).current;
 
@@ -261,47 +296,28 @@ function VideoLightbox({ item, onClose, onDelete }) {
     <Modal visible transparent animationType="none" statusBarTranslucent>
       <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000', transform: [{ translateY: slideAnim }] }]}>
         <StatusBar hidden />
-
-        {/* Video */}
         <TouchableWithoutFeedback onPress={togglePlay}>
-          <View style={{ flex: 1, transform: [{ scaleX: -1 }] }}>
-            <VideoView
-              player={player}
-              style={StyleSheet.absoluteFillObject}
-              contentFit="contain"
-              nativeControls={false}
-            />
+          <View style={{ flex: 1 }}>
+            <VideoView player={player} style={StyleSheet.absoluteFillObject} contentFit="contain" nativeControls={false} />
           </View>
         </TouchableWithoutFeedback>
-
-        {/* Controls overlay */}
         <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: ctrlOpacity }]} pointerEvents="box-none">
-
-          {/* Top bar */}
           <View style={vl.topBar}>
             <TouchableOpacity style={vl.iconBtn} onPress={close} activeOpacity={0.8}>
               <X size={18} color="#fff" strokeWidth={2.5} />
             </TouchableOpacity>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity style={vl.iconBtn} onPress={() => setIsMuted(m => !m)} activeOpacity={0.8}>
-                {isMuted
-                  ? <VolumeX size={18} color="#fff" strokeWidth={2} />
-                  : <Volume2 size={18} color="#fff" strokeWidth={2} />
-                }
+                {isMuted ? <VolumeX size={18} color="#fff" strokeWidth={2} /> : <Volume2 size={18} color="#fff" strokeWidth={2} />}
               </TouchableOpacity>
               <TouchableOpacity style={vl.iconBtn} onPress={handleDownload} activeOpacity={0.8} disabled={downloading}>
-                {downloading
-                  ? <ActivityIndicator size={14} color="#fff" />
-                  : <ArrowDown size={18} color="#fff" strokeWidth={2.5} />
-                }
+                {downloading ? <ActivityIndicator size={14} color="#fff" /> : <ArrowDown size={18} color="#fff" strokeWidth={2.5} />}
               </TouchableOpacity>
               <TouchableOpacity style={vl.iconBtn} onPress={handleDelete} activeOpacity={0.8}>
                 <Trash2 size={16} color={T.danger} strokeWidth={2} />
               </TouchableOpacity>
             </View>
           </View>
-
-          {/* Centre play button */}
           {!isPlaying && (
             <View style={vl.centrePlay} pointerEvents="none">
               <View style={vl.centrePlayCircle}>
@@ -309,21 +325,13 @@ function VideoLightbox({ item, onClose, onDelete }) {
               </View>
             </View>
           )}
-
-          {/* Bottom controls */}
           <View style={vl.bottomBar}>
             <Text style={vl.timeText}>{fmtTime(currentTime)}</Text>
-
-            {/* Scrubber */}
             <View style={[vl.scrubTrack, { width: SCRUB_W }]} {...scrubPan.panHandlers}>
-              {/* Track bg */}
               <View style={{ position: 'absolute', left: 0, right: 0, height: 3, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, top: 9 }} />
-              {/* Progress fill */}
               <View style={{ position: 'absolute', left: 0, width: `${progress * 100}%`, height: 3, backgroundColor: '#FFF', borderRadius: 2, top: 9 }} />
-              {/* Thumb */}
               <View style={[vl.scrubThumb, { left: `${progress * 100}%`, marginLeft: -8 }]} />
             </View>
-
             <Text style={vl.timeText}>{fmtTime(duration)}</Text>
           </View>
         </Animated.View>
@@ -340,45 +348,34 @@ const vl = StyleSheet.create({
   },
   iconBtn: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center',
   },
-  centrePlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center', justifyContent: 'center',
-  },
+  centrePlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   centrePlayCircle: {
     width: 72, height: 72, borderRadius: 36,
     backgroundColor: 'rgba(0,0,0,0.55)',
     borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)',
-    alignItems: 'center', justifyContent: 'center',
-    paddingLeft: 4,
+    alignItems: 'center', justifyContent: 'center', paddingLeft: 4,
   },
   bottomBar: {
     position: 'absolute', bottom: Platform.OS === 'ios' ? 48 : 24,
-    left: 0, right: 0,
-    flexDirection: 'row', alignItems: 'center',
+    left: 0, right: 0, flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 20, gap: 10,
-    backgroundColor: 'transparent',
   },
   timeText: {
     color: 'rgba(255,255,255,0.7)', fontSize: 11, fontVariant: ['tabular-nums'],
     letterSpacing: 0.3, minWidth: 36,
   },
-  scrubTrack: {
-    flex: 1, height: 20, justifyContent: 'center',
-  },
+  scrubTrack: { flex: 1, height: 20, justifyContent: 'center' },
   scrubThumb: {
-    position: 'absolute', top: 4,
-    width: 16, height: 16, borderRadius: 8,
-    backgroundColor: '#FFF',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.4, shadowRadius: 2,
+    position: 'absolute', top: 4, width: 16, height: 16, borderRadius: 8,
+    backgroundColor: '#FFF', shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.4, shadowRadius: 2,
   },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PHOTO LIGHTBOX — swipe-down dismiss, double-tap zoom, toolbar
+// PHOTO LIGHTBOX
 // ─────────────────────────────────────────────────────────────────────────────
 
 function PhotoLightbox({ item, onClose, onDelete }) {
@@ -389,7 +386,6 @@ function PhotoLightbox({ item, onClose, onDelete }) {
   const [zoomed, setZoomed] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
-  const toolbarTimer = useRef(null);
   const lastTap = useRef(0);
 
   useEffect(() => {
@@ -403,7 +399,6 @@ function PhotoLightbox({ item, onClose, onDelete }) {
     ]).start(onClose);
   };
 
-  // Swipe down to dismiss
   const swipePan = useRef(PanResponder.create({
     onMoveShouldSetPanResponder: (_, g) => !zoomed && Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
     onPanResponderMove: (_, g) => {
@@ -426,16 +421,9 @@ function PhotoLightbox({ item, onClose, onDelete }) {
   const handleTap = () => {
     const now = Date.now();
     if (now - lastTap.current < 280) {
-      // Double tap — toggle zoom
-      if (zoomed) {
-        Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
-        setZoomed(false);
-      } else {
-        Animated.spring(scale, { toValue: 2.2, useNativeDriver: true }).start();
-        setZoomed(true);
-      }
+      if (zoomed) { Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start(); setZoomed(false); }
+      else { Animated.spring(scale, { toValue: 2.2, useNativeDriver: true }).start(); setZoomed(true); }
     } else {
-      // Single tap — toggle toolbar
       setShowToolbar(v => !v);
     }
     lastTap.current = now;
@@ -458,23 +446,13 @@ function PhotoLightbox({ item, onClose, onDelete }) {
     <Modal visible transparent animationType="none" statusBarTranslucent>
       <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000', opacity: bgOpacity, transform: [{ translateY: slideAnim }] }]}>
         <StatusBar hidden />
-
-        <Animated.View
-          style={[StyleSheet.absoluteFillObject, { transform: [{ translateY }] }]}
-          {...swipePan.panHandlers}
-        >
+        <Animated.View style={[StyleSheet.absoluteFillObject, { transform: [{ translateY }] }]} {...swipePan.panHandlers}>
           <TouchableWithoutFeedback onPress={handleTap}>
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <Animated.Image
-                source={{ uri: item.uri }}
-                style={{ width: W, height: H, transform: [{ scale }] }}
-                resizeMode="contain"
-              />
+              <Animated.Image source={{ uri: item.uri }} style={{ width: W, height: H, transform: [{ scale }] }} resizeMode="contain" />
             </View>
           </TouchableWithoutFeedback>
         </Animated.View>
-
-        {/* Top bar */}
         {showToolbar && (
           <View style={pl.topBar}>
             <TouchableOpacity style={pl.iconBtn} onPress={close} activeOpacity={0.8}>
@@ -482,10 +460,7 @@ function PhotoLightbox({ item, onClose, onDelete }) {
             </TouchableOpacity>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity style={pl.iconBtn} onPress={handleDownload} activeOpacity={0.8} disabled={downloading}>
-                {downloading
-                  ? <ActivityIndicator size={14} color="#fff" />
-                  : <ArrowDown size={18} color="#fff" strokeWidth={2.5} />
-                }
+                {downloading ? <ActivityIndicator size={14} color="#fff" /> : <ArrowDown size={18} color="#fff" strokeWidth={2.5} />}
               </TouchableOpacity>
               <TouchableOpacity style={pl.iconBtn} onPress={handleDelete} activeOpacity={0.8}>
                 <Trash2 size={16} color={T.danger} strokeWidth={2} />
@@ -493,8 +468,6 @@ function PhotoLightbox({ item, onClose, onDelete }) {
             </View>
           </View>
         )}
-
-        {/* Swipe-down hint line */}
         <View style={pl.swipeHint} />
       </Animated.View>
     </Modal>
@@ -509,22 +482,21 @@ const pl = StyleSheet.create({
   },
   iconBtn: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center',
   },
   swipeHint: {
-    position: 'absolute', top: Platform.OS === 'ios' ? 12 : 8,
-    alignSelf: 'center',
-    width: 36, height: 4, borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    position: 'absolute', top: Platform.OS === 'ios' ? 12 : 8, alignSelf: 'center',
+    width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)',
   },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LOCK SCREEN
+// Shows when biometrics are available but auth failed/cancelled.
+// Shows a different message when the device has no biometrics enrolled.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function LockScreen({ onUnlock, reason, failed }) {
+function LockScreen({ onUnlock, reason, failed, noBiometrics }) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -546,13 +518,19 @@ function LockScreen({ onUnlock, reason, failed }) {
       </Animated.View>
       <Text style={ls.title}>Private Vault</Text>
       <Text style={ls.subtitle}>
-        {failed ? (reason ?? 'Authentication failed.') : "Only you can see what's in here."}
+        {noBiometrics
+          ? 'slatt requires Face ID or Touch ID to access your vault. Please enrol a biometric in your device Settings and try again.'
+          : failed
+            ? (reason ?? 'Authentication failed.')
+            : "Only you can see what's in here."}
       </Text>
-      <TouchableOpacity style={ls.unlockBtn} onPress={onUnlock} activeOpacity={0.85}>
-        <Lock size={16} color={T.bg} strokeWidth={2.5} />
-        <Text style={ls.unlockTxt}>Unlock with Face ID</Text>
-      </TouchableOpacity>
-      {failed && <Text style={ls.retryNote}>Tap above to try again</Text>}
+      {!noBiometrics && (
+        <TouchableOpacity style={ls.unlockBtn} onPress={onUnlock} activeOpacity={0.85}>
+          <Lock size={16} color={T.bg} strokeWidth={2.5} />
+          <Text style={ls.unlockTxt}>Unlock with Face ID</Text>
+        </TouchableOpacity>
+      )}
+      {failed && !noBiometrics && <Text style={ls.retryNote}>Tap above to try again</Text>}
     </View>
   );
 }
@@ -582,46 +560,25 @@ const ls = StyleSheet.create({
 // ─────────────────────────────────────────────────────────────────────────────
 // THUMBNAIL
 // ─────────────────────────────────────────────────────────────────────────────
+
 function Thumb({ item, selected, selecting, onPress, onLongPress }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const [thumbUri, setThumbUri] = useState(item.uri);
   const [loading, setLoading] = useState(false);
 
-  // Automatically generate a proper video frame when it's a video
   useEffect(() => {
     let isMounted = true;
-
     const extractThumbnail = async () => {
       if (!item.isVideo || !item.uri) return;
-
-      // Skip if we already have a generated thumbnail on this item
-      if (item.thumbUri) {
-        setThumbUri(item.thumbUri);
-        return;
-      }
-
+      if (item.thumbUri) { setThumbUri(item.thumbUri); return; }
       setLoading(true);
       try {
-        const { uri: generatedUri } = await VideoThumbnails.getThumbnailAsync(item.uri, {
-          time: 500,           // extract frame at 0.5 seconds (feels more natural)
-          quality: 0.85,
-        });
-
-        if (isMounted) {
-          setThumbUri(generatedUri);
-          // Optional: attach it to the item so it doesn't regenerate next render
-          // item.thumbUri = generatedUri;
-        }
-      } catch (error) {
-        console.warn('Thumbnail generation failed:', error);
-        // Fallback: keep the original uri (Image will try its best)
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+        const { uri: generatedUri } = await VideoThumbnails.getThumbnailAsync(item.uri, { time: 500, quality: 0.85 });
+        if (isMounted) setThumbUri(generatedUri);
+      } catch { /* keep original uri */ }
+      finally { if (isMounted) setLoading(false); }
     };
-
     extractThumbnail();
-
     return () => { isMounted = false; };
   }, [item.isVideo, item.uri]);
 
@@ -634,50 +591,27 @@ function Thumb({ item, selected, selecting, onPress, onLongPress }) {
   };
 
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      onLongPress={handleLongPress}
-      delayLongPress={350}
-      activeOpacity={0.88}
-      style={{ width: THUMB, height: THUMB }}
-    >
+    <TouchableOpacity onPress={onPress} onLongPress={handleLongPress} delayLongPress={350} activeOpacity={0.88} style={{ width: THUMB, height: THUMB }}>
       <Animated.View style={{ flex: 1, transform: [{ scale: scaleAnim }] }}>
-        <Image
-          source={{ uri: thumbUri }}
-          style={{ width: '100%', height: '100%' }}
-          resizeMode="cover"
-        />
-
+        <Image source={{ uri: thumbUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
         {item.isVideo && (
           <View style={th.videoBadge}>
             <Play size={8} color="#fff" fill="#fff" strokeWidth={0} />
           </View>
         )}
-
-        {/* Overlay when selecting */}
         {selecting && !selected && (
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
         )}
-
         {selecting && selected && (
           <View style={th.checkWrap}>
             <CheckCircle size={20} color={T.accent} fill="rgba(0,0,0,0.7)" strokeWidth={2} />
           </View>
         )}
-
         {selected && (
-          <View
-            style={[StyleSheet.absoluteFillObject, { borderWidth: 2, borderColor: T.accent }]}
-            pointerEvents="none"
-          />
+          <View style={[StyleSheet.absoluteFillObject, { borderWidth: 2, borderColor: T.accent }]} pointerEvents="none" />
         )}
-
-        {/* Small loading indicator while generating thumbnail */}
         {loading && item.isVideo && (
-          <View style={[
-            StyleSheet.absoluteFillObject,
-            { backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }
-          ]}>
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }]}>
             <ActivityIndicator size="small" color="#fff" />
           </View>
         )}
@@ -686,13 +620,11 @@ function Thumb({ item, selected, selecting, onPress, onLongPress }) {
   );
 }
 
-
 const th = StyleSheet.create({
   videoBadge: {
     position: 'absolute', bottom: 6, right: 6,
     width: 20, height: 20, borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center',
   },
   checkWrap: { position: 'absolute', top: 6, right: 6 },
 });
@@ -706,7 +638,7 @@ const TABS = ['All', 'Photos', 'Videos'];
 export default function MediaVaultScreen() {
   const router = useRouter();
 
-  const [authState, setAuthState] = useState('idle');
+  const [authState, setAuthState] = useState('idle');  // idle|pending|ok|failed|no_biometrics
   const [authReason, setAuthReason] = useState(null);
   const [allFiles, setAllFiles] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -721,31 +653,29 @@ export default function MediaVaultScreen() {
     return true;
   });
 
-  // ── Auth ──────────────────────────────────────────────────────────────────
+  // ── Auth — biometric only ─────────────────────────────────────────────────
   const authenticate = useCallback(async () => {
     setAuthState('pending');
     setAuthReason(null);
-    try {
-      const [hw, enrolled] = await Promise.all([
-        LocalAuthentication.hasHardwareAsync(),
-        LocalAuthentication.isEnrolledAsync(),
-      ]);
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Unlock your vault',
-        fallbackLabel: '',
-        cancelLabel: 'Cancel',
-        disableDeviceFallback: false,
-        ...(hw && enrolled ? { biometricsSecurityLevel: 'strong' } : {}),
-      });
-      if (result.success) {
+
+    const outcome = await vaultUnlockAuth();
+
+    switch (outcome) {
+      case 'ok':
         setAuthState('ok');
-      } else {
+        break;
+      case 'no_biometrics':
+        // Device has no Face ID / Touch ID enrolled — vault cannot be opened.
+        // We do NOT fall back to passcode. Show a clear explanation.
+        setAuthState('no_biometrics');
+        break;
+      case 'cancelled':
         setAuthState('failed');
-        setAuthReason(result.error === 'user_cancel' ? 'Authentication cancelled.' : null);
-      }
-    } catch (e) {
-      setAuthState('failed');
-      setAuthReason(e?.message ?? null);
+        setAuthReason('Authentication cancelled.');
+        break;
+      default:
+        setAuthState('failed');
+        setAuthReason(null);
     }
   }, []);
 
@@ -793,14 +723,13 @@ export default function MediaVaultScreen() {
     );
   }, [selected, cancelSelection]);
 
-  // Called from lightbox delete button
   const handleDeleteOne = useCallback(uri => {
     FileSystem.deleteAsync(uri, { idempotent: true }).then(() => {
       setAllFiles(prev => prev.filter(f => f.uri !== uri));
     });
   }, []);
 
-  // ── Pending / failed states ───────────────────────────────────────────────
+  // ── States ────────────────────────────────────────────────────────────────
   if (authState === 'idle' || authState === 'pending') {
     return (
       <View style={{ flex: 1, backgroundColor: T.bg, alignItems: 'center', justifyContent: 'center', gap: 14 }}>
@@ -809,6 +738,10 @@ export default function MediaVaultScreen() {
         <ActivityIndicator color={T.accent} />
       </View>
     );
+  }
+
+  if (authState === 'no_biometrics') {
+    return <LockScreen onUnlock={authenticate} noBiometrics />;
   }
 
   if (authState === 'failed') {
@@ -823,7 +756,6 @@ export default function MediaVaultScreen() {
       <StatusBar barStyle="light-content" />
 
       <SafeAreaView style={{ backgroundColor: T.bg }}>
-        {/* Header */}
         <View style={g.header}>
           {selecting ? (
             <>
@@ -843,25 +775,19 @@ export default function MediaVaultScreen() {
               </TouchableOpacity>
             </>
           ) : (
-            <>
-            </>
+            <></>
           )}
         </View>
 
-        {/* Tab bar */}
         <View style={g.tabs}>
           {TABS.map(t => (
-            <TouchableOpacity
-              key={t} onPress={() => setTab(t)} activeOpacity={0.7}
-              style={[g.tab, tab === t && g.tabActive]}
-            >
+            <TouchableOpacity key={t} onPress={() => setTab(t)} activeOpacity={0.7} style={[g.tab, tab === t && g.tabActive]}>
               <Text style={[g.tabTxt, tab === t && g.tabTxtActive]}>{t}</Text>
             </TouchableOpacity>
           ))}
         </View>
       </SafeAreaView>
 
-      {/* Grid */}
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={T.accent} size="large" />
@@ -869,10 +795,7 @@ export default function MediaVaultScreen() {
       ) : isEmpty ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
           <View style={g.emptyIconWrap}>
-            {tab === 'Videos'
-              ? <Film size={32} color={T.accentDim} strokeWidth={1.5} />
-              : <ImageIcon size={32} color={T.accentDim} strokeWidth={1.5} />
-            }
+            {tab === 'Videos' ? <Film size={32} color={T.accentDim} strokeWidth={1.5} /> : <ImageIcon size={32} color={T.accentDim} strokeWidth={1.5} />}
           </View>
           <Text style={g.emptyTitle}>Nothing here yet</Text>
           <Text style={g.emptySub}>
@@ -894,40 +817,24 @@ export default function MediaVaultScreen() {
               item={item}
               selected={selected.has(item.uri)}
               selecting={selecting}
-              onPress={() => {
-                if (selecting) { toggleSelect(item.uri); return; }
-                setPreview(item);
-              }}
-              onLongPress={() => {
-                if (!selecting) setSelecting(true);
-                toggleSelect(item.uri);
-              }}
+              onPress={() => { if (selecting) { toggleSelect(item.uri); return; } setPreview(item); }}
+              onLongPress={() => { if (!selecting) setSelecting(true); toggleSelect(item.uri); }}
             />
           )}
         />
       )}
 
-      {/* Selection count pill */}
       {selecting && selected.size > 0 && (
         <View style={g.countPill}>
           <Text style={g.countTxt}>{selected.size} selected</Text>
         </View>
       )}
 
-      {/* Lightboxes */}
       {preview?.isVideo && (
-        <VideoLightbox
-          item={preview}
-          onClose={() => setPreview(null)}
-          onDelete={uri => { setPreview(null); handleDeleteOne(uri); }}
-        />
+        <VideoLightbox item={preview} onClose={() => setPreview(null)} onDelete={uri => { setPreview(null); handleDeleteOne(uri); }} />
       )}
       {preview && !preview.isVideo && (
-        <PhotoLightbox
-          item={preview}
-          onClose={() => setPreview(null)}
-          onDelete={uri => { setPreview(null); handleDeleteOne(uri); }}
-        />
+        <PhotoLightbox item={preview} onClose={() => setPreview(null)} onDelete={uri => { setPreview(null); handleDeleteOne(uri); }} />
       )}
     </View>
   );
@@ -942,12 +849,8 @@ const g = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10,
   },
-  headerBtn: {
-    width: 44, height: 36, alignItems: 'center', justifyContent: 'center',
-  },
-  headerTitle: {
-    color: T.accent, fontSize: 15, fontWeight: '700', letterSpacing: 0.4,
-  },
+  headerBtn: { width: 44, height: 36, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: T.accent, fontSize: 15, fontWeight: '700', letterSpacing: 0.4 },
   tabs: {
     flexDirection: 'row', marginHorizontal: 16, marginBottom: 10,
     backgroundColor: T.bgCard, borderRadius: 10, padding: 3,

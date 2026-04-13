@@ -15,7 +15,9 @@
       "buildNumber": "1",
       "version": "1.0.3",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSFaceIDUsageDescription": "slatt uses Face ID to protect your private vault. Your media stays on-device and is never uploaded.",
+        "NSPhotoLibraryAddUsageDescription": "slatt saves media to your Photos library only when you explicitly choose to export from the vault. No data is uploaded."
       }
     },
     "android": {
@@ -28,6 +30,14 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "slatt uses your camera to capture photos and videos. Everything you shoot is stored privately on your device and is never uploaded, shared, or sent anywhere.",
+          "microphonePermission": "slatt uses your microphone to record audio with videos. Audio is stored only on your device and is never uploaded, shared, or sent anywhere.",
+          "recordAudioAndroid": true
+        }
+      ],
       "expo-router",
       [
         "expo-splash-screen",
