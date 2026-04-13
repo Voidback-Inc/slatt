@@ -12,8 +12,8 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.voidback.slatt",
-      "buildNumber": "1",
-      "version": "1.0.3",
+      "buildNumber": "2",
+      "version": "1.0.4",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSFaceIDUsageDescription": "slatt uses Face ID to protect your private vault. Your media stays on-device and is never uploaded.",
