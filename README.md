@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="slatt/assets/images/icon.png" class="w-[100px] rounded-xl" alt="slatt" />
+<img src="slatt/assets/images/icon.png" style="width: 100px; border-radius: 20px;" class="rounded-xl" alt="slatt" />
 
 # slatt
 
@@ -165,7 +165,7 @@ legal@voidback.com
 
 <div align="center">
 
-<img src="slatt/assets/images/icon.png" class="w-[64px] rounded-xl" alt="slatt" />
+<img class="rounded-xl" src="slatt/assets/images/icon.png" style="width: 64px; border-radius: 20px;" alt="slatt" />
 
 slatt &nbsp;·&nbsp; Voidback, Inc. &nbsp;·&nbsp; Delaware 2026
 
