@@ -1,78 +1,59 @@
-import {
-  initConnection,
-  endConnection,
-  getSubscriptions,
-  requestSubscription,
-  finishTransaction,
-  purchaseUpdatedListener,
-  purchaseErrorListener,
-  getAvailablePurchases,
-  type SubscriptionPurchase,
-} from 'react-native-iap';
+import Purchases, { LOG_LEVEL, type PurchasesPackage } from 'react-native-purchases';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
 
-export const PRODUCT_IDS = {
-  monthly: 'com.voidback.slatt.monthly',
-  annual: 'com.voidback.slatt.annual',
-} as const;
+export type PlanKey = 'monthly' | 'annual';
 
-export type PlanKey = keyof typeof PRODUCT_IDS;
+const REVENUECAT_APPLE_KEY = process.env.EXPO_PUBLIC_REVENUECAT_APPLE_KEY ?? '';
 
-let connectionActive = false;
+let configured = false;
 
-export async function setupIAP(): Promise<() => void> {
-  if (Platform.OS !== 'ios') return () => {};
+export function setupIAP(): () => void {
+  if (Platform.OS !== 'ios' || configured) return () => {};
   try {
-    await initConnection();
-    connectionActive = true;
+    Purchases.setLogLevel(LOG_LEVEL.ERROR);
+    Purchases.configure({ apiKey: REVENUECAT_APPLE_KEY });
+    configured = true;
+
+    const listener = Purchases.addCustomerInfoUpdateListener(async (info) => {
+      const isActive = Object.keys(info.entitlements.active).length > 0;
+      if (isActive) await activatePro();
+    });
+    return () => listener.remove();
   } catch {
-    // IAP not available (simulator, no Apple account, etc.)
+    return () => {};
   }
-
-  const purchaseSub = purchaseUpdatedListener(async (purchase: SubscriptionPurchase) => {
-    if (purchase.transactionReceipt) {
-      await verifyAndActivate(purchase.transactionReceipt);
-      await finishTransaction({ purchase });
-    }
-  });
-
-  const errorSub = purchaseErrorListener(() => {
-    // purchase cancelled or failed — no action needed
-  });
-
-  return () => {
-    purchaseSub.remove();
-    errorSub.remove();
-    if (connectionActive) endConnection();
-  };
 }
 
 export async function purchasePlan(plan: PlanKey): Promise<void> {
-  await requestSubscription({ sku: PRODUCT_IDS[plan] });
+  const offerings = await Purchases.getOfferings();
+  const current = offerings.current;
+  if (!current) throw new Error('No offerings available');
+
+  const pkg: PurchasesPackage | null =
+    plan === 'monthly' ? current.monthly : current.annual;
+  if (!pkg) throw new Error(`No ${plan} package found`);
+
+  await Purchases.purchasePackage(pkg);
+  await activatePro();
 }
 
 export async function restorePurchases(): Promise<boolean> {
   try {
-    const purchases = await getAvailablePurchases();
-    for (const purchase of purchases) {
-      if (purchase.transactionReceipt) {
-        const ok = await verifyAndActivate(purchase.transactionReceipt);
-        if (ok) return true;
-      }
-    }
-    return false;
+    const info = await Purchases.restorePurchases();
+    const isActive = Object.keys(info.entitlements.active).length > 0;
+    if (isActive) await activatePro();
+    return isActive;
   } catch {
     return false;
   }
 }
 
-async function verifyAndActivate(receiptData: string): Promise<boolean> {
+async function activatePro(): Promise<void> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return false;
-
-    const res = await fetch(
+    if (!session) return;
+    await fetch(
       `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/apple-iap`,
       {
         method: 'POST',
@@ -80,11 +61,8 @@ async function verifyAndActivate(receiptData: string): Promise<boolean> {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ receiptData }),
+        body: JSON.stringify({ activate: true }),
       },
     );
-    return res.ok;
-  } catch {
-    return false;
-  }
+  } catch {}
 }
