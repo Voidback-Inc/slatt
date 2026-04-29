@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, ScrollView,
   StyleSheet, Alert, Modal, Share,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -64,85 +64,84 @@ function ConversationModal({
   onClose: () => void;
   onContinue: () => void;
 }) {
+  const insets = useSafeAreaInsets();
   const isAtLimit = profile?.tier === 'free' &&
     (profile.queries_today ?? 0) >= FREE_DAILY_LIMIT;
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
-      <View style={md.root}>
-        <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-          {/* Header */}
-          <View style={md.header}>
-            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Feather name="chevron-down" size={22} color={T.muted} />
-            </TouchableOpacity>
-            <Text style={md.title} numberOfLines={1}>{conv.title}</Text>
-            <TouchableOpacity
-              onPress={() => Share.share({ message: conv.messages.map(m => `${m.role === 'user' ? 'You' : 'slatt'}: ${m.content}`).join('\n\n') })}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Feather name="share" size={18} color={T.muted} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Messages */}
-          <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={md.list}
-            showsVerticalScrollIndicator={false}
+      <View style={[md.root, { paddingTop: insets.top }]}>
+        {/* Header — sits below status bar */}
+        <View style={md.header}>
+          <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Feather name="chevron-down" size={22} color={T.muted} />
+          </TouchableOpacity>
+          <Text style={md.title} numberOfLines={1}>{conv.title}</Text>
+          <TouchableOpacity
+            onPress={() => Share.share({ message: conv.messages.map(m => `${m.role === 'user' ? 'You' : 'slatt'}: ${m.content}`).join('\n\n') })}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            {conv.messages.map(msg =>
-              msg.role === 'user' ? (
-                <TouchableOpacity
-                  key={msg.id}
-                  activeOpacity={0.85}
-                  onLongPress={() => Share.share({ message: msg.content })}
-                  delayLongPress={400}
-                  style={md.userWrap}
-                >
-                  <LinearGradient
-                    colors={GRAD_USER}
-                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                    style={md.userBubble}
-                  >
-                    <Text style={md.userText}>{msg.content}</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  key={msg.id}
-                  activeOpacity={1}
-                  onLongPress={() => Share.share({ message: msg.content })}
-                  delayLongPress={400}
-                  style={md.agentBubble}
-                >
-                  <Text style={md.agentLabel}>slatt</Text>
-                  <Text style={md.agentText}>{msg.content}</Text>
-                </TouchableOpacity>
-              )
-            )}
-          </ScrollView>
+            <Feather name="share" size={18} color={T.muted} />
+          </TouchableOpacity>
+        </View>
 
-          {/* Continue button */}
-          <View style={md.footer}>
-            {isAtLimit ? (
-              <View style={md.limitWrap}>
-                <Text style={md.limitText}>Daily limit reached — upgrade to continue.</Text>
-              </View>
-            ) : (
-              <TouchableOpacity onPress={onContinue} activeOpacity={0.85} style={md.continueOuter}>
+        {/* Messages */}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={md.list}
+          showsVerticalScrollIndicator={false}
+        >
+          {conv.messages.map(msg =>
+            msg.role === 'user' ? (
+              <TouchableOpacity
+                key={msg.id}
+                activeOpacity={0.85}
+                onLongPress={() => Share.share({ message: msg.content })}
+                delayLongPress={400}
+                style={md.userWrap}
+              >
                 <LinearGradient
-                  colors={['#1D9BF0', '#8B5CF6']}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                  style={md.continueBtn}
+                  colors={GRAD_USER}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                  style={md.userBubble}
                 >
-                  <Feather name="message-circle" size={15} color="#fff" />
-                  <Text style={md.continueText}>Continue conversation</Text>
+                  <Text style={md.userText}>{msg.content}</Text>
                 </LinearGradient>
               </TouchableOpacity>
-            )}
-          </View>
-        </SafeAreaView>
+            ) : (
+              <TouchableOpacity
+                key={msg.id}
+                activeOpacity={1}
+                onLongPress={() => Share.share({ message: msg.content })}
+                delayLongPress={400}
+                style={md.agentBubble}
+              >
+                <Text style={md.agentLabel}>slatt</Text>
+                <Text style={md.agentText}>{msg.content}</Text>
+              </TouchableOpacity>
+            )
+          )}
+        </ScrollView>
+
+        {/* Continue button — floats above home indicator */}
+        <View style={[md.footer, { paddingBottom: insets.bottom + 12 }]}>
+          {isAtLimit ? (
+            <View style={md.limitWrap}>
+              <Text style={md.limitText}>Daily limit reached — upgrade to continue.</Text>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={onContinue} activeOpacity={0.85} style={md.continueOuter}>
+              <LinearGradient
+                colors={['#1D9BF0', '#8B5CF6']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={md.continueBtn}
+              >
+                <Feather name="message-circle" size={15} color="#fff" />
+                <Text style={md.continueText}>Continue conversation</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     </Modal>
   );
@@ -169,7 +168,7 @@ const md = StyleSheet.create({
   agentLabel: { color: 'rgba(255,255,255,0.18)', fontSize: 9, fontWeight: '800', letterSpacing: 1.5, marginBottom: 7 },
   agentText: { color: 'rgba(255,255,255,0.88)', fontSize: 15, lineHeight: 23 },
   footer: {
-    paddingHorizontal: 16, paddingVertical: 12,
+    paddingHorizontal: 16, paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.07)',
   },
   continueOuter: { borderRadius: 16, overflow: 'hidden' },

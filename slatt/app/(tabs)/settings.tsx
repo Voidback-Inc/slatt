@@ -150,17 +150,32 @@ export default function SettingsScreen() {
     try {
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!hasHardware || !isEnrolled) {
-        Alert.alert('Face ID required', 'Set up Face ID in your device settings to delete your account.');
+      if (!hasHardware) {
+        Alert.alert('Face ID not available', 'This device does not support Face ID. Account deletion is only available on Face ID devices.');
+        return;
+      }
+      if (!isEnrolled) {
+        Alert.alert('Face ID not set up', 'Go to Settings → Face ID & Passcode to enroll Face ID before deleting your account.');
         return;
       }
       const biometric = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Confirm your identity to delete account',
+        promptMessage: 'Confirm identity to delete account',
         disableDeviceFallback: true,
         cancelLabel: 'Cancel',
+        fallbackLabel: '',
       });
       if (!biometric.success) {
-        Alert.alert('Verification failed', 'Face ID was not successful. Please try again.');
+        const errorCode = (biometric as any).error as string | undefined;
+        if (errorCode === 'UserCancel' || errorCode === 'SystemCancel') return;
+        if (errorCode === 'BiometryLockout') {
+          Alert.alert('Face ID locked', 'Too many failed attempts. Go to Settings → Face ID & Passcode to re-enable Face ID, then try again.');
+          return;
+        }
+        if (errorCode === 'BiometryNotEnrolled') {
+          Alert.alert('Face ID not set up', 'Go to Settings → Face ID & Passcode to enroll Face ID before deleting your account.');
+          return;
+        }
+        Alert.alert('Verification failed', 'Face ID was not recognised. Please try again.');
         return;
       }
       const { error } = await supabase.auth.signInWithOtp({
