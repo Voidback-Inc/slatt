@@ -25,6 +25,7 @@ const T = {
   pro: '#F5C842',
   danger: '#FF3B30',
   green: '#34C759',
+  ask: '#1D9BF0',
 };
 
 const YEAR = '2026';
@@ -88,6 +89,13 @@ export default function SettingsScreen() {
   const [deleteStep, setDeleteStep] = useState<'otp' | null>(null);
   const [deleteOtp, setDeleteOtp] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [changePwStep, setChangePwStep] = useState<'otp' | 'newPassword' | null>(null);
+  const [changePwOtp, setChangePwOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changePwLoading, setChangePwLoading] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
 
   useEffect(() => { loadProfile(); }, []);
 
@@ -222,6 +230,62 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleChangePassword = async () => {
+    if (!email) return;
+    setChangePwLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { shouldCreateUser: false },
+      });
+      if (error) { Alert.alert('Error', error.message); return; }
+      setChangePwOtp('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setChangePwStep('otp');
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to send code. Try again.');
+    } finally {
+      setChangePwLoading(false);
+    }
+  };
+
+  const confirmChangePwOtp = async () => {
+    if (changePwOtp.length !== 8 || changePwLoading) return;
+    setChangePwLoading(true);
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        email,
+        token: changePwOtp,
+        type: 'email',
+      });
+      if (error) { Alert.alert('Invalid code', error.message); return; }
+      setChangePwStep('newPassword');
+    } finally {
+      setChangePwLoading(false);
+    }
+  };
+
+  const submitNewPassword = async () => {
+    if (newPassword.length < 8) {
+      Alert.alert('Too short', 'Password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Mismatch', "Passwords don't match.");
+      return;
+    }
+    setChangePwLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) { Alert.alert('Error', error.message); return; }
+      setChangePwStep(null);
+      Alert.alert('Done', 'Password updated successfully.');
+    } finally {
+      setChangePwLoading(false);
+    }
+  };
+
   const handleOpenSource = async () => {
     if (await Linking.canOpenURL(OPENSOURCE)) {
       await Linking.openURL(OPENSOURCE);
@@ -272,6 +336,13 @@ export default function SettingsScreen() {
               {isPro ? 'Pro' : 'Free'}
             </Text>
           </View>
+          <View style={s.divider} />
+          <TouchableOpacity style={s.infoRow} onPress={handleChangePassword} disabled={changePwLoading}>
+            <Text style={s.infoLabel}>Password</Text>
+            {changePwLoading
+              ? <ActivityIndicator size="small" color={T.accentDim} />
+              : <Text style={[s.infoValue, { color: T.ask }]}>Change</Text>}
+          </TouchableOpacity>
 
           {!isPro && (
             <>
@@ -376,6 +447,106 @@ export default function SettingsScreen() {
           slatt is provided as-is with no warranty.
         </Text>
       </ScrollView>
+
+      {/* Change password — OTP step */}
+      <Modal
+        visible={changePwStep === 'otp'}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setChangePwStep(null)}
+      >
+        <View style={ds.overlay}>
+          <View style={ds.card}>
+            <View style={ds.pill} />
+            <Text style={ds.title}>Verify it's you</Text>
+            <Text style={ds.sub}>
+              Enter the 8-digit code sent to{'\n'}
+              <Text style={{ color: '#fff', fontWeight: '600' }}>{email}</Text>
+            </Text>
+            <TextInput
+              style={ds.otpInput}
+              value={changePwOtp}
+              onChangeText={t => setChangePwOtp(t.replace(/\D/g, '').slice(0, 8))}
+              keyboardType="number-pad"
+              placeholder="00000000"
+              placeholderTextColor="rgba(255,255,255,0.18)"
+              maxLength={8}
+              autoFocus
+            />
+            <TouchableOpacity
+              onPress={confirmChangePwOtp}
+              disabled={changePwOtp.length < 8 || changePwLoading}
+              style={[ds.confirmBtn, { backgroundColor: T.ask }, changePwOtp.length < 8 && { opacity: 0.4 }]}
+              activeOpacity={0.82}
+            >
+              {changePwLoading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={ds.confirmText}>Continue</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setChangePwStep(null)} style={ds.cancel}>
+              <Text style={ds.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Change password — new password step */}
+      <Modal
+        visible={changePwStep === 'newPassword'}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setChangePwStep(null)}
+      >
+        <View style={ds.overlay}>
+          <View style={ds.card}>
+            <View style={ds.pill} />
+            <Text style={ds.title}>New password</Text>
+            <Text style={ds.sub}>Choose a strong password — at least 8 characters.</Text>
+            <View style={pw2.inputWrap}>
+              <TextInput
+                style={pw2.input}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                placeholder="New password"
+                placeholderTextColor="rgba(255,255,255,0.18)"
+                secureTextEntry={!showNewPw}
+                autoFocus
+                autoCapitalize="none"
+              />
+              <TouchableOpacity onPress={() => setShowNewPw(v => !v)} style={pw2.eye}>
+                <Text style={pw2.eyeText}>{showNewPw ? 'Hide' : 'Show'}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={[pw2.inputWrap, { marginBottom: 20 }]}>
+              <TextInput
+                style={pw2.input}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="Confirm password"
+                placeholderTextColor="rgba(255,255,255,0.18)"
+                secureTextEntry={!showConfirmPw}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity onPress={() => setShowConfirmPw(v => !v)} style={pw2.eye}>
+                <Text style={pw2.eyeText}>{showConfirmPw ? 'Hide' : 'Show'}</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              onPress={submitNewPassword}
+              disabled={newPassword.length < 8 || newPassword !== confirmPassword || changePwLoading}
+              style={[ds.confirmBtn, { backgroundColor: T.ask }, (newPassword.length < 8 || newPassword !== confirmPassword) && { opacity: 0.4 }]}
+              activeOpacity={0.82}
+            >
+              {changePwLoading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={ds.confirmText}>Update password</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setChangePwStep(null)} style={ds.cancel}>
+              <Text style={ds.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Delete account OTP modal */}
       <Modal
@@ -570,4 +741,19 @@ const ds = StyleSheet.create({
   confirmText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   cancel: { alignItems: 'center', paddingVertical: 14 },
   cancelText: { color: 'rgba(255,255,255,0.45)', fontSize: 14 },
+});
+
+const pw2 = StyleSheet.create({
+  inputWrap: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#111', borderRadius: 14,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    height: 56, marginBottom: 12, paddingHorizontal: 16,
+  },
+  input: {
+    flex: 1, color: '#fff', fontSize: 15,
+    autoCapitalize: 'none',
+  } as any,
+  eye: { paddingLeft: 12 },
+  eyeText: { color: 'rgba(255,255,255,0.4)', fontSize: 13, fontWeight: '600' },
 });
