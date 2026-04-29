@@ -34,8 +34,15 @@ export function setupIAP(): () => void {
     rc.setLogLevel(LOG_LEVEL.ERROR);
     rc.configure({ apiKey: APPLE_KEY });
     configured = true;
+    // Identify user so RevenueCat subscriber ID matches Supabase user ID.
+    // This makes webhook lookups and REST API calls work correctly.
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) rc.logIn(user.id).catch(() => {});
+    });
     const sub = rc.addCustomerInfoUpdateListener(async (info: any) => {
-      if (Object.keys(info.entitlements.active).length > 0) await activatePro();
+      const hasActive = Object.keys(info.entitlements.active).length > 0;
+      if (hasActive) await activatePro();
+      else await deactivatePro();
     });
     return () => sub.remove();
   } catch (e) {
@@ -83,6 +90,18 @@ async function activatePro() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
       body: JSON.stringify({ activate: true }),
+    });
+  } catch {}
+}
+
+async function deactivatePro() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/apple-iap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ activate: false }),
     });
   } catch {}
 }

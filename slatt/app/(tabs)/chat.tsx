@@ -20,7 +20,7 @@ import { supabase } from '@/lib/supabase';
 import { upsertConversation, consumePendingResume } from '@/lib/history';
 import { FREE_DAILY_LIMIT, STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
 import { setupIAP, purchasePlan, type PlanKey } from '@/lib/iap';
-import type { Profile } from '@/lib/supabase';
+import { useProfile } from '@/lib/useProfile';
 
 const T = {
   bg: '#000',
@@ -312,7 +312,7 @@ export default function ChatScreen() {
   const [mode, setMode] = useState<Mode>('teach');
   const [manualMode, setManualMode] = useState(false);
   const [sending, setSending] = useState(false);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { profile, reloadProfile } = useProfile();
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<PlanKey | null>(null);
   const [kbVisible, setKbVisible] = useState(false);
@@ -349,22 +349,9 @@ export default function ChatScreen() {
     return () => { show.remove(); hide.remove(); };
   }, []);
 
-  useEffect(() => { loadProfile(); }, []);
-
   useEffect(() => {
     if (!manualMode && input.length > 2) setMode(detectMode(input));
   }, [input, manualMode]);
-
-  const loadProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, tier, queries_today, queries_reset_date, stripe_customer_id, stripe_subscription_id')
-      .eq('id', user.id)
-      .single();
-    if (data) setProfile(data as Profile);
-  };
 
   const queriesLeft = profile?.tier === 'free'
     ? Math.min(FREE_DAILY_LIMIT, Math.max(0, FREE_DAILY_LIMIT - (profile.queries_today ?? 0)))
@@ -434,7 +421,7 @@ export default function ChatScreen() {
 
       if (res.status === 429) {
         setShowPaywall(true);
-        loadProfile();
+        reloadProfile();
         return;
       }
 
@@ -450,7 +437,7 @@ export default function ChatScreen() {
       const final = [...withUser, agentMsg];
       setMessages(final);
       persistConversation(final);
-      loadProfile();
+      reloadProfile();
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unable to connect. Check your connection.';
@@ -476,7 +463,7 @@ export default function ChatScreen() {
     try {
       await purchasePlan(plan);
       setShowPaywall(false);
-      await loadProfile();
+      await reloadProfile();
     } catch {
       // cancelled or error
     } finally {

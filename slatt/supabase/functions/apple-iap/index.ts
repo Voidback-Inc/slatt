@@ -23,32 +23,61 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: cors });
   }
 
-  // Verify entitlement with RevenueCat if secret is set
-  if (REVENUECAT_SECRET) {
-    try {
-      const rcRes = await fetch(`https://api.revenuecat.com/v1/subscribers/${user.id}`, {
-        headers: { 'Authorization': `Bearer ${REVENUECAT_SECRET}` },
-      });
-      if (rcRes.ok) {
-        const rcData = await rcRes.json();
-        const entitlements = rcData.subscriber?.entitlements ?? {};
-        const isActive = Object.values(entitlements).some(
-          (e: any) => e.expires_date === null || new Date(e.expires_date) > new Date()
-        );
-        if (!isActive) {
-          return new Response(JSON.stringify({ error: 'No active entitlement' }), {
-            status: 402, headers: { ...cors, 'Content-Type': 'application/json' },
-          });
+  const { activate } = await req.json();
+
+  if (activate) {
+    // Verify entitlement with RevenueCat before granting pro
+    if (REVENUECAT_SECRET) {
+      try {
+        const rcRes = await fetch(`https://api.revenuecat.com/v1/subscribers/${user.id}`, {
+          headers: { 'Authorization': `Bearer ${REVENUECAT_SECRET}` },
+        });
+        if (rcRes.ok) {
+          const rcData = await rcRes.json();
+          const entitlements = rcData.subscriber?.entitlements ?? {};
+          const isActive = Object.values(entitlements).some(
+            (e: any) => e.expires_date === null || new Date(e.expires_date) > new Date()
+          );
+          if (!isActive) {
+            return new Response(JSON.stringify({ error: 'No active entitlement' }), {
+              status: 402, headers: { ...cors, 'Content-Type': 'application/json' },
+            });
+          }
         }
+      } catch {
+        // RevenueCat check failed — trust the client signal and grant access
       }
-    } catch {
-      // If RevenueCat check fails, fall through and trust the client
     }
+    await supabase.from('profiles').update({ tier: 'pro' }).eq('id', user.id);
+    return new Response(JSON.stringify({ ok: true, tier: 'pro' }), {
+      status: 200, headers: { ...cors, 'Content-Type': 'application/json' },
+    });
+  } else {
+    // Deactivate — verify no active entitlement before downgrading
+    let shouldDowngrade = true;
+    if (REVENUECAT_SECRET) {
+      try {
+        const rcRes = await fetch(`https://api.revenuecat.com/v1/subscribers/${user.id}`, {
+          headers: { 'Authorization': `Bearer ${REVENUECAT_SECRET}` },
+        });
+        if (rcRes.ok) {
+          const rcData = await rcRes.json();
+          const entitlements = rcData.subscriber?.entitlements ?? {};
+          const isActive = Object.values(entitlements).some(
+            (e: any) => e.expires_date === null || new Date(e.expires_date) > new Date()
+          );
+          if (isActive) shouldDowngrade = false;
+        }
+      } catch {
+        // RevenueCat check failed — don't downgrade to be safe
+        shouldDowngrade = false;
+      }
+    }
+    if (shouldDowngrade) {
+      await supabase.from('profiles').update({ tier: 'free' }).eq('id', user.id);
+    }
+    return new Response(JSON.stringify({ ok: true, tier: shouldDowngrade ? 'free' : 'pro' }), {
+      status: 200, headers: { ...cors, 'Content-Type': 'application/json' },
+    });
   }
-
-  await supabase.from('profiles').update({ tier: 'pro' }).eq('id', user.id);
-
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200, headers: { ...cors, 'Content-Type': 'application/json' },
-  });
 });

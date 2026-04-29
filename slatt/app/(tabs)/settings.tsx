@@ -10,8 +10,8 @@ import { ChevronDown, Shield, FileText, ExternalLink, LogOut, Trash2 } from 'luc
 import { supabase } from '@/lib/supabase';
 import { STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
 import { setupIAP, purchasePlan, restorePurchases, type PlanKey } from '@/lib/iap';
+import { useProfile } from '@/lib/useProfile';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
-import type { Profile } from '@/lib/supabase';
 import Logo from '@/assets/images/icon.png';
 
 const T = {
@@ -82,8 +82,7 @@ function Badge({ label, color }: { label: string; color?: string }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [email, setEmail] = useState<string>('');
+  const { profile, email, reloadProfile } = useProfile();
   const [upgradeLoading, setUpgradeLoading] = useState<PlanKey | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -98,30 +97,18 @@ export default function SettingsScreen() {
   const [showNewPw, setShowNewPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
 
-  useEffect(() => { loadProfile(); }, []);
-
   useEffect(() => {
     const teardown = setupIAP();
     return teardown;
   }, []);
 
-  const loadProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setEmail(user.email ?? '');
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, tier, queries_today, queries_reset_date, stripe_customer_id, stripe_subscription_id')
-      .eq('id', user.id)
-      .single();
-    if (data) setProfile(data as Profile);
-  };
-
   const handleUpgrade = async (plan: PlanKey) => {
     setUpgradeLoading(plan);
     try {
       await purchasePlan(plan);
-      await loadProfile();
+      // Realtime subscription in useProfile will update automatically;
+      // reloadProfile is a safety net for immediate confirmation.
+      await reloadProfile();
     } catch {
       // cancelled or error
     } finally {
@@ -134,7 +121,7 @@ export default function SettingsScreen() {
     try {
       const ok = await restorePurchases();
       if (ok) {
-        await loadProfile();
+        await reloadProfile();
         Alert.alert('Restored', 'Your Pro subscription has been restored.');
       } else {
         Alert.alert('Nothing to restore', 'No active subscription found for this Apple ID.');
