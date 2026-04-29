@@ -1,5 +1,8 @@
 import { Platform, Alert } from 'react-native';
+import Constants from 'expo-constants';
 import { supabase } from './supabase';
+
+const isExpoGo = Constants.appOwnership === 'expo';
 
 export type PlanKey = 'monthly' | 'annual';
 
@@ -15,7 +18,7 @@ function load() {
 }
 
 export function setupIAP(): () => void {
-  if (Platform.OS !== 'ios' || !APPLE_KEY) return () => {};
+  if (Platform.OS !== 'ios' || !APPLE_KEY || isExpoGo) return () => {};
   const rc = load();
   if (!rc || configured) return () => {};
   try {
@@ -35,8 +38,8 @@ export function setupIAP(): () => void {
 
 export async function purchasePlan(plan: PlanKey): Promise<void> {
   const rc = load();
-  if (!rc) {
-    Alert.alert('Not available', 'In-app purchases require a real device build.');
+  if (!rc || isExpoGo) {
+    Alert.alert('Not available', 'In-app purchases only work on a real device build.');
     return;
   }
   const offerings = await rc.getOfferings();
