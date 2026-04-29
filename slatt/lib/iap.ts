@@ -33,7 +33,7 @@ export async function setupIAP(): Promise<() => void> {
   const purchaseSub = purchaseUpdatedListener(async (purchase: SubscriptionPurchase) => {
     if (purchase.transactionReceipt) {
       await verifyAndActivate(purchase.transactionReceipt);
-      await finishTransaction({ purchase, isConsumable: false });
+      await finishTransaction({ purchase });
     }
   });
 
