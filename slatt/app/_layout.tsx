@@ -1,54 +1,57 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { DarkTheme, ThemeProvider } from '@react-navigation/native';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { View } from 'react-native';
 import 'react-native-reanimated';
-import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
-import '@/global.css';
+import { supabase } from '@/lib/supabase';
+import type { Session } from '@supabase/supabase-js';
 
+function AuthGate({ session }: { session: Session | null }) {
+  const router = useRouter();
+  const segments = useSegments();
 
+  useEffect(() => {
+    const inAuth = segments[0] === '(auth)';
+    const inTabs = segments[0] === '(tabs)';
 
+    if (!session && !inAuth) {
+      router.replace('/(auth)/login');
+    } else if (session && !inTabs) {
+      router.replace('/(tabs)/chat');
+    }
+  }, [session, segments]);
 
-
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
-
-
-
+  return null;
+}
 
 export default function RootLayout() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [initialized, setInitialized] = useState(false);
 
-  const router = useRouter();
-
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setInitialized(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setInitialized(true);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   return (
-    <GluestackUIProvider mode="dark">
+    <View style={{ flex: 1 }}>
       <ThemeProvider value={DarkTheme}>
-        <Stack
-        >
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-
-          <Stack.Screen
-            name="(modals)/DatasetSelect"
-            options={{
-              presentation: 'modal',
-              headerTitle: 'Pick Dataset',
-            }}
-          />
-
-
-          <Stack.Screen
-            name="(auth)"
-            options={{
-              headerShown: false
-            }}
-          />
-
-
+        {initialized && <AuthGate session={session} />}
+        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(tabs)" />
         </Stack>
-        <StatusBar style="auto" />
+        <StatusBar style="light" />
       </ThemeProvider>
-    </GluestackUIProvider>
+    </View>
   );
 }

@@ -1,9 +1,10 @@
 {
   "expo": {
     "name": "Slatt",
+    "description": "slatt is collective intelligence that grows smarter as people teach it. Ask questions, get verified answers, and contribute what you know — fact-checked or from real personal experience.",
     "sdkVersion": "54.0.0",
     "slug": "slatt",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "slatt",
@@ -12,12 +13,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.voidback.slatt",
-      "buildNumber": "3",
-      "version": "1.0.5",
+      "buildNumber": "4",
+      "version": "1.0.6",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSFaceIDUsageDescription": "slatt uses Face ID to protect your private vault. Your media stays on-device and is never uploaded.",
-        "NSPhotoLibraryAddUsageDescription": "slatt saves media to your Photos library only when you explicitly choose to export from the vault. No data is uploaded."
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -30,14 +29,6 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "slatt uses your camera to capture photos and videos. Everything you shoot is stored privately on your device and is never uploaded, shared, or sent anywhere.",
-          "microphonePermission": "slatt uses your microphone to record audio with videos. Audio is stored only on your device and is never uploaded, shared, or sent anywhere.",
-          "recordAudioAndroid": true
-        }
-      ],
       "expo-router",
       [
         "expo-splash-screen",
@@ -51,8 +42,13 @@
           }
         }
       ],
-      "expo-video",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow slatt to use Face ID to confirm your identity when deleting your account."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
