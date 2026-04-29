@@ -1,0 +1,70 @@
+{
+  "version": "5",
+  "redirects": {
+    "https://esm.sh/@supabase/phoenix@^0.4.1?target=denonext": "https://esm.sh/@supabase/phoenix@0.4.1?target=denonext",
+    "https://esm.sh/@supabase/supabase-js@2": "https://esm.sh/@supabase/supabase-js@2.105.1",
+    "https://esm.sh/iceberg-js@^0.8.1?target=denonext": "https://esm.sh/iceberg-js@0.8.1?target=denonext"
+  },
+  "remote": {
+    "https://esm.sh/@supabase/auth-js@2.105.1/denonext/auth-js.mjs": "c5f027326557fd5e129e3a966932105bd5c76bc410d1c262d8d6fa4758707753",
+    "https://esm.sh/@supabase/functions-js@2.105.1/denonext/functions-js.mjs": "b36dc195bb7742f7f0424c6202d5a5c48fa9b579310942de375c6ba24e40a87b",
+    "https://esm.sh/@supabase/phoenix@0.4.1/denonext/phoenix.mjs": "90a9f887b7a8e21d1928f4edd2aa62842b348f4dda81d79ded6ad70503ab14f8",
+    "https://esm.sh/@supabase/phoenix@0.4.1?target=denonext": "d45f006997b634de18932bf86b45f0ca66c11e8b1de9cb34d48aa3fe80c65a43",
+    "https://esm.sh/@supabase/postgrest-js@2.105.1/denonext/postgrest-js.mjs": "4f878a3ac38bcba2c0ec1b229c41cf0cbda4019a1d2b39d4d97e9af647e6e03c",
+    "https://esm.sh/@supabase/realtime-js@2.105.1/denonext/realtime-js.mjs": "07760754498c39c43fffd6c7c38ddd816a88885e01e78bc9c9f9c9239259c847",
+    "https://esm.sh/@supabase/storage-js@2.105.1/denonext/storage-js.mjs": "259fb2cec58f55b4f605f03b56d94d6d806bc5d70461d563435438be7a4301e8",
+    "https://esm.sh/@supabase/supabase-js@2.105.1": "d96e63cd3c7d0a07d5821a3573b4923d0e556e064633265c584656d95b22fa38",
+    "https://esm.sh/@supabase/supabase-js@2.105.1/denonext/supabase-js.mjs": "be653d3819a9ae95dbc46efe935d7abc3cadc9cc0a3254050a7ef7d773f61449",
+    "https://esm.sh/antonlytics@2.0.0": "8c85431d9e810a4a1b5942a9e755fdb3b7f37a336a6a832ef0236196fe0c7695",
+    "https://esm.sh/antonlytics@2.0.0/denonext/antonlytics.mjs": "49d26e86ff27bbe85bea13f2f7f5e9382944a31036166e46ec2cdd07ea91894a",
+    "https://esm.sh/iceberg-js@0.8.1/denonext/iceberg-js.mjs": "d839d81a2e3966500ca2cdd0c1cb458e9608bacfc91f7bb67a69b2e878dcdb4f",
+    "https://esm.sh/iceberg-js@0.8.1?target=denonext": "58c849d7fe2bf4eca4a84eb501e83c161a7d8c34ca1bec15a962b3bec3062633",
+    "https://esm.sh/tslib@2.8.1/denonext/tslib.mjs": "c38da5dd6da6281964435002ce204cd586634fe3bdfb24a0ee116f48cf3292e9"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@expo/vector-icons@^15.0.3",
+        "npm:@react-native-async-storage/async-storage@2.2.0",
+        "npm:@react-navigation/bottom-tabs@^7.4.0",
+        "npm:@react-navigation/elements@^2.6.3",
+        "npm:@react-navigation/native@^7.1.8",
+        "npm:@supabase/supabase-js@^2.105.0",
+        "npm:@types/react@19.1",
+        "npm:babel-plugin-module-resolver@^5.0.2",
+        "npm:eslint-config-expo@10.0",
+        "npm:eslint@^9.25.0",
+        "npm:expo-blur@~15.0.8",
+        "npm:expo-constants@~18.0.13",
+        "npm:expo-crypto@~15.0.8",
+        "npm:expo-file-system@~19.0.21",
+        "npm:expo-font@~14.0.11",
+        "npm:expo-linear-gradient@~15.0.8",
+        "npm:expo-linking@~8.0.11",
+        "npm:expo-local-authentication@~17.0.8",
+        "npm:expo-router@~6.0.23",
+        "npm:expo-secure-store@~15.0.8",
+        "npm:expo-splash-screen@~31.0.13",
+        "npm:expo-status-bar@~3.0.9",
+        "npm:expo-system-ui@~6.0.9",
+        "npm:expo-web-browser@~15.0.10",
+        "npm:expo@~54.0.33",
+        "npm:lucide-react-native@0.577",
+        "npm:nativewind@^4.2.2",
+        "npm:prettier-plugin-tailwindcss@~0.5.14",
+        "npm:react-dom@19.1.0",
+        "npm:react-native-gesture-handler@2.28",
+        "npm:react-native-reanimated@4.1",
+        "npm:react-native-safe-area-context@5.6",
+        "npm:react-native-screens@4.16",
+        "npm:react-native-svg@15.12.1",
+        "npm:react-native-web@0.21",
+        "npm:react-native-worklets@0.5.1",
+        "npm:react-native@0.81.5",
+        "npm:react@19.1.0",
+        "npm:tailwindcss@^3.4.19",
+        "npm:typescript@~5.9.2"
+      ]
+    }
+  }
+}
