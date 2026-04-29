@@ -472,8 +472,17 @@ export default function ChatScreen() {
     convIdRef.current = null;
   };
 
-  const handleUpgrade = async (_plan: PlanKey) => {
-    Alert.alert('Coming soon', 'In-app purchases will be available in the next update.');
+  const handleUpgrade = async (plan: PlanKey) => {
+    setCheckoutLoading(plan);
+    try {
+      await purchasePlan(plan);
+      setShowPaywall(false);
+      await loadProfile();
+    } catch {
+      // cancelled or error
+    } finally {
+      setCheckoutLoading(null);
+    }
   };
 
   return (

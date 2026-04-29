@@ -118,12 +118,31 @@ export default function SettingsScreen() {
     if (data) setProfile(data as Profile);
   };
 
-  const handleUpgrade = async (_plan: PlanKey) => {
-    Alert.alert('Coming soon', 'In-app purchases will be available in the next update.');
+  const handleUpgrade = async (plan: PlanKey) => {
+    setUpgradeLoading(plan);
+    try {
+      await purchasePlan(plan);
+      await loadProfile();
+    } catch {
+      // cancelled or error
+    } finally {
+      setUpgradeLoading(null);
+    }
   };
 
   const handleRestore = async () => {
-    Alert.alert('Coming soon', 'Restore purchases will be available in the next update.');
+    setRestoring(true);
+    try {
+      const ok = await restorePurchases();
+      if (ok) {
+        await loadProfile();
+        Alert.alert('Restored', 'Your Pro subscription has been restored.');
+      } else {
+        Alert.alert('Nothing to restore', 'No active subscription found for this Apple ID.');
+      }
+    } finally {
+      setRestoring(false);
+    }
   };
 
   const handleSignOut = async () => {
