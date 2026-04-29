@@ -1,8 +1,5 @@
 # slatt — Collective Intelligence
 
-<p align="center">
-  <img src="./assets/images/icon.png" width="100" style="border-radius:22px" />
-</p>
 
 **slatt** is a mobile app that lets people teach a shared AI agent and ask it anything. It grows smarter as contributors add knowledge, and it stays objective by fact-checking claims, labelling anecdotal experiences, and citing sources.
 
