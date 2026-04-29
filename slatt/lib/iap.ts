@@ -60,8 +60,18 @@ export async function purchasePlan(plan: PlanKey): Promise<void> {
   if (!rc) return;
   try {
     const offerings = await rc.getOfferings();
-    const pkg = plan === 'monthly' ? offerings.current?.monthly : offerings.current?.annual;
-    if (!pkg) throw new Error(`No ${plan} package found in RevenueCat.`);
+    const current = offerings.current;
+    if (!current) throw new Error('No offerings available. Make sure products are configured in RevenueCat.');
+
+    // Try shorthand first ($rc_monthly / $rc_annual), then scan all packages by type
+    let pkg = plan === 'monthly' ? current.monthly : current.annual;
+    if (!pkg) {
+      const targetType = plan === 'monthly' ? 'MONTHLY' : 'ANNUAL';
+      pkg = (current.availablePackages ?? []).find(
+        (p: any) => p.packageType === targetType,
+      ) ?? null;
+    }
+    if (!pkg) throw new Error(`No ${plan} package found. Check RevenueCat offering setup.`);
     await rc.purchasePackage(pkg);
     await activatePro();
   } catch (e: any) {

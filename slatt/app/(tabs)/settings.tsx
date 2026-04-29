@@ -21,6 +21,7 @@ const T = {
   accent: '#FFF',
   accentDim: 'rgba(255,255,255,0.45)',
   accentSub: 'rgba(255,255,255,0.18)',
+  muted: 'rgba(255,255,255,0.40)',
   border: 'rgba(255,255,255,0.07)',
   pro: '#F5C842',
   danger: '#FF3B30',
@@ -106,11 +107,11 @@ export default function SettingsScreen() {
     setUpgradeLoading(plan);
     try {
       await purchasePlan(plan);
-      // Realtime subscription in useProfile will update automatically;
-      // reloadProfile is a safety net for immediate confirmation.
       await reloadProfile();
-    } catch {
-      // cancelled or error
+    } catch (e: any) {
+      if (!e?.userCancelled) {
+        Alert.alert('Purchase failed', e?.message ?? 'Something went wrong. Please try again.');
+      }
     } finally {
       setUpgradeLoading(null);
     }

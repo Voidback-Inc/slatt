@@ -464,8 +464,10 @@ export default function ChatScreen() {
       await purchasePlan(plan);
       setShowPaywall(false);
       await reloadProfile();
-    } catch {
-      // cancelled or error
+    } catch (e: any) {
+      if (!e?.userCancelled) {
+        Alert.alert('Purchase failed', e?.message ?? 'Something went wrong. Please try again.');
+      }
     } finally {
       setCheckoutLoading(null);
     }
