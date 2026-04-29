@@ -605,7 +605,7 @@ export default function ChatScreen() {
         )}
 
         {/* ── Input area ── */}
-        <View style={[s.inputWrap, { paddingBottom: kbVisible ? 4 : 8 }]}>
+        <View style={[s.inputWrap, { paddingBottom: 20 }]}>
 
           {/* Mode selector */}
           <View style={s.modeRow}>
