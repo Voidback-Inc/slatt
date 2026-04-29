@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, TextInput,
   StyleSheet, StatusBar, Animated, Platform,
-  Linking, Alert, ActivityIndicator, Modal,
+  Linking, Alert, ActivityIndicator, Modal, KeyboardAvoidingView,
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -455,7 +455,10 @@ export default function SettingsScreen() {
         animationType="slide"
         onRequestClose={() => setChangePwStep(null)}
       >
-        <View style={ds.overlay}>
+        <KeyboardAvoidingView
+          style={ds.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={ds.card}>
             <View style={ds.pill} />
             <Text style={ds.title}>Verify it's you</Text>
@@ -487,7 +490,7 @@ export default function SettingsScreen() {
               <Text style={ds.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Change password — new password step */}
@@ -497,7 +500,10 @@ export default function SettingsScreen() {
         animationType="slide"
         onRequestClose={() => setChangePwStep(null)}
       >
-        <View style={ds.overlay}>
+        <KeyboardAvoidingView
+          style={ds.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={ds.card}>
             <View style={ds.pill} />
             <Text style={ds.title}>New password</Text>
@@ -545,7 +551,7 @@ export default function SettingsScreen() {
               <Text style={ds.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Delete account OTP modal */}
