@@ -4,12 +4,12 @@ import {
   StyleSheet, StatusBar, Animated, Platform,
   Linking, Alert, ActivityIndicator, Modal, KeyboardAvoidingView,
 } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { Image } from 'react-native';
 import { ChevronDown, Shield, FileText, ExternalLink, LogOut, Trash2 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
+import { setupIAP, purchasePlan, restorePurchases, type PlanKey } from '@/lib/iap';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
 import type { Profile } from '@/lib/supabase';
 import Logo from '@/assets/images/icon.png';
@@ -84,7 +84,8 @@ function Badge({ label, color }: { label: string; color?: string }) {
 export default function SettingsScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [email, setEmail] = useState<string>('');
-  const [upgradeLoading, setUpgradeLoading] = useState<'monthly' | 'annual' | null>(null);
+  const [upgradeLoading, setUpgradeLoading] = useState<PlanKey | null>(null);
+  const [restoring, setRestoring] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [deleteStep, setDeleteStep] = useState<'otp' | null>(null);
   const [deleteOtp, setDeleteOtp] = useState('');
@@ -99,6 +100,12 @@ export default function SettingsScreen() {
 
   useEffect(() => { loadProfile(); }, []);
 
+  useEffect(() => {
+    let teardown: (() => void) | undefined;
+    setupIAP().then(fn => { teardown = fn; });
+    return () => teardown?.();
+  }, []);
+
   const loadProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -111,40 +118,30 @@ export default function SettingsScreen() {
     if (data) setProfile(data as Profile);
   };
 
-  const handleUpgrade = async (plan: 'monthly' | 'annual') => {
+  const handleUpgrade = async (plan: PlanKey) => {
     setUpgradeLoading(plan);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        Alert.alert('Not signed in', 'Please sign in again.');
-        return;
-      }
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/checkout`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ plan }),
-        },
-      );
-      const json = await res.json();
-      if (!res.ok) {
-        Alert.alert('Upgrade failed', json.error ?? `Server error ${res.status}`);
-        return;
-      }
-      if (!json.url) {
-        Alert.alert('Upgrade failed', 'No checkout URL returned. Stripe secrets may not be configured.');
-        return;
-      }
-      await WebBrowser.openBrowserAsync(json.url);
+      await purchasePlan(plan);
       await loadProfile();
-    } catch (err) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to start checkout');
+    } catch {
+      // user cancelled or IAP error
     } finally {
       setUpgradeLoading(null);
+    }
+  };
+
+  const handleRestore = async () => {
+    setRestoring(true);
+    try {
+      const ok = await restorePurchases();
+      if (ok) {
+        await loadProfile();
+        Alert.alert('Restored', 'Your Pro subscription has been restored.');
+      } else {
+        Alert.alert('Nothing to restore', 'No active subscription found for this Apple ID.');
+      }
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -375,6 +372,11 @@ export default function SettingsScreen() {
                     )}
                 </TouchableOpacity>
               </View>
+              <TouchableOpacity onPress={handleRestore} disabled={restoring} style={{ marginTop: 12, alignItems: 'center' }}>
+                {restoring
+                  ? <ActivityIndicator size="small" color={T.muted} />
+                  : <Text style={{ color: T.muted, fontSize: 13, fontWeight: '500' }}>Restore purchases</Text>}
+              </TouchableOpacity>
             </>
           )}
         </View>

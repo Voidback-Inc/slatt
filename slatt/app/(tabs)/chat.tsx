@@ -13,13 +13,13 @@ import Animated, {
   useSharedValue, useAnimatedStyle,
   withRepeat, withSequence, withTiming,
 } from 'react-native-reanimated';
-import * as WebBrowser from 'expo-web-browser';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { upsertConversation, consumePendingResume } from '@/lib/history';
 import { FREE_DAILY_LIMIT, STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
+import { setupIAP, purchasePlan, type PlanKey } from '@/lib/iap';
 import type { Profile } from '@/lib/supabase';
 
 const T = {
@@ -314,11 +314,18 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [showPaywall, setShowPaywall] = useState(false);
-  const [checkoutLoading, setCheckoutLoading] = useState<'monthly' | 'annual' | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState<PlanKey | null>(null);
   const [kbVisible, setKbVisible] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const convIdRef = useRef<string | null>(null);
   const lastSentRef = useRef<{ text: string; mode: Mode } | null>(null);
+
+  // IAP connection lifecycle
+  useEffect(() => {
+    let teardown: (() => void) | undefined;
+    setupIAP().then(fn => { teardown = fn; });
+    return () => teardown?.();
+  }, []);
 
   // Resume a conversation navigated-to from history
   useFocusEffect(useCallback(() => {
@@ -465,24 +472,14 @@ export default function ChatScreen() {
     convIdRef.current = null;
   };
 
-  const handleUpgrade = async (plan: 'monthly' | 'annual') => {
+  const handleUpgrade = async (plan: PlanKey) => {
     setCheckoutLoading(plan);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/checkout`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-          body: JSON.stringify({ plan }),
-        },
-      );
-      const { url } = await res.json();
-      if (url) {
-        await WebBrowser.openBrowserAsync(url);
-        setShowPaywall(false);
-        await loadProfile();
-      }
+      await purchasePlan(plan);
+      setShowPaywall(false);
+      await loadProfile();
+    } catch {
+      // user cancelled or IAP error — do nothing
     } finally {
       setCheckoutLoading(null);
     }
