@@ -1,0 +1,77 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "version": "1.0",
+    "copyright": "Voidback, Inc.",
+    "release": {
+      "automaticRelease": true
+    },
+    "info": {
+      "en-US": {
+        "description": "Slatt is a private camera app built for people who actually care where their photos and videos end up.\nEverything you capture is stored exclusively on your device in an encrypted sandbox — protected by Face ID or Touch ID. There are no servers, no cloud sync, no analytics, no crash reporters, and no third-party SDKs phoning home. The app has zero internet access. Not even a single network request leaves your phone.\nWhat you get:\n· A clean, fast camera with photo and video capture\n· A biometric-locked vault only you can open\n· The ability to download media back to your Photos library — with Face ID confirmation\n· No accounts, no sign-ups, no subscriptions\nWhat we don't do:\n· We don't collect your data\n· We don't know who you are\n· We don't have servers that could be breached\n· We don't make money from your attention or your information\nSlatt is entirely open source. Every line of code is public — you can verify every claim we make.\nMade by Voidback, Inc. — incorporated in Delaware, 2026.",
+        "keywords": [
+          "Slatt",
+          "Vault",
+          "Opensource",
+          "Camera",
+          "Secure Vault",
+          "Photo Vault",
+          "Photos"
+        ],
+        "marketingUrl": "https://voidback.com",
+        "promoText": "No accounts. \nNo ads. \nNo analytics. \nNo internet connection, ever. \nJust a clean camera, a secure vault, and total privacy.\nBuilt by Voidback, Inc. Fully open source.",
+        "supportUrl": "https://voidback.com",
+        "title": "Slatt",
+        "subtitle": "Capture privately. Always.",
+        "privacyPolicyUrl": "https://voidback.com/privacy/slatt",
+        "screenshots": {
+          "APP_IPHONE_67": [
+            "store/apple/screenshot/en-US/APP_IPHONE_67/iPhones  6.9-05.png",
+            "store/apple/screenshot/en-US/APP_IPHONE_67/iPhones  6.9-01.png",
+            "store/apple/screenshot/en-US/APP_IPHONE_67/iPhones  6.9-04.png",
+            "store/apple/screenshot/en-US/APP_IPHONE_67/iPhones  6.9-03.png"
+          ],
+          "APP_IPAD_PRO_3GEN_129": [
+            "store/apple/screenshot/en-US/APP_IPAD_PRO_3GEN_129/02.png",
+            "store/apple/screenshot/en-US/APP_IPAD_PRO_3GEN_129/04.png",
+            "store/apple/screenshot/en-US/APP_IPAD_PRO_3GEN_129/01.png",
+            "store/apple/screenshot/en-US/APP_IPAD_PRO_3GEN_129/05.png",
+            "store/apple/screenshot/en-US/APP_IPAD_PRO_3GEN_129/03.png"
+          ]
+        }
+      }
+    },
+    "categories": [
+      "PHOTO_AND_VIDEO",
+      "LIFESTYLE"
+    ],
+    "advisory": {
+      "ageRatingOverride": "SIXTEEN_PLUS",
+      "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+      "contests": "NONE",
+      "gambling": false,
+      "gamblingSimulated": "NONE",
+      "horrorOrFearThemes": "NONE",
+      "kidsAgeBand": null,
+      "koreaAgeRatingOverride": "NONE",
+      "lootBox": false,
+      "matureOrSuggestiveThemes": "NONE",
+      "medicalOrTreatmentInformation": "NONE",
+      "profanityOrCrudeHumor": "NONE",
+      "sexualContentGraphicAndNudity": "NONE",
+      "sexualContentOrNudity": "NONE",
+      "unrestrictedWebAccess": false,
+      "violenceCartoonOrFantasy": "NONE",
+      "violenceRealistic": "NONE",
+      "violenceRealisticProlongedGraphicOrSadistic": "NONE"
+    },
+    "review": {
+      "firstName": "Mohamed",
+      "lastName": "Tah",
+      "email": "mohamedtah2024@gmail.com",
+      "phone": "+971585638906",
+      "demoRequired": false,
+      "notes": "The app requires no login, and you are welcome to check the source code by clicking the link in the settings."
+    }
+  }
+}
