@@ -138,11 +138,10 @@ async function evaluateTeaching(
           system: `You are a quality gate for a shared knowledge base. Evaluate whether the teaching should be accepted, flagged, or rejected.
 
 ── ACCEPT:ANECDOTAL — personal experience, file as anecdotal ──
-Use when the claim is clearly from personal experience or second-hand ("a friend told me"):
-• First-person accounts ("I tried X and got Y", "I found that...", "in my experience...", "I noticed...")
-• Second-hand personal accounts ("my friend does X and says Y", "a colleague told me that...")
-• Any claim framed as "I" or "my" that's about the contributor's own life or work
-These are valuable but must be labeled as anecdotal so the collective can present them with proper context.
+ONLY use when the claim is DIRECTLY from the contributor's own life or their close contacts:
+• First-person accounts using "I", "my", "me" ("I tried X and got Y", "in my experience...", "I noticed...")
+• Explicit second-hand personal accounts ("my friend told me...", "a colleague of mine did X...")
+DO NOT use for third-person claims about public figures, events, history, or things the contributor is describing from the outside. Those are NEEDS_EVIDENCE or ACCEPT depending on the stakes.
 
 ── ACCEPT — accept as general knowledge ──
 • Words, slang, phrases, translations, transliterations in any language
@@ -216,6 +215,11 @@ function isAnecdotalConfirmation(text: string): boolean {
   if (/\b(friend|colleague|coworker|my partner|someone i know|they told me|told me|showed me)\b/.test(t)) return true;
   if (/^(yes|yeah|yep|yup|correct|that's right|it's personal|personal|anecdotal|experience|mine|my own|from experience|from my experience)[\s.,!]*$/.test(t)) return true;
   return false;
+}
+
+function isFirstPersonAccount(text: string): boolean {
+  const t = text.toLowerCase();
+  return /\b(i |i've|i'm|i'll|i'd|my |me |myself|in my|from my|i tried|i found|i noticed|i did|i've done|i use|i used|i saw|i went|i ran|i built|i sold|i closed|my friend|my colleague|my partner|a friend of mine|someone i know|they told me|told me that)\b/.test(t);
 }
 
 function detectFollowUpContext(history: HistoryMessage[]): { isPending: boolean; originalClaim?: string } {
@@ -434,25 +438,33 @@ Deno.serve(async (req) => {
                 skipped: true,
               };
             } else if (evaluation.isAnecdotal) {
-              // Personal experience — ingest with anecdotal tag
               isSkipped = true;
-              const anecdotalText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${message}`;
-              try {
-                const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-                await withTimeout(agent.setSystemPrompt(SYSTEM_PROMPT), 10000).catch(() => {});
-                const result = await withTimeout(agent.ingest(anecdotalText), 25000);
-                const created = result?.created ?? 0;
+              if (!isFirstPersonAccount(message)) {
+                // Third-person claim flagged as anecdotal — ask before assuming
+                body = {
+                  message: "That needs receipts before it goes in — is this from your own experience or did someone you know tell you this? If so, just say so and I'll file it as personal experience. Otherwise drop a source or link.",
+                  skipped: true,
+                };
+              } else {
+                // Clearly first-person — ingest with anecdotal tag directly
+                const anecdotalText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${message}`;
+                try {
+                  const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+                  await withTimeout(agent.setSystemPrompt(SYSTEM_PROMPT), 10000).catch(() => {});
+                  const result = await withTimeout(agent.ingest(anecdotalText), 25000);
+                  const created = result?.created ?? 0;
 
-                if (created === 0) {
-                  body = { message: "Appreciated, but too vague to file anything useful. Add a bit more detail about what you experienced.", created: 0 };
-                } else {
-                  body = { message: acknowledgeAnecdotal(message), created };
+                  if (created === 0) {
+                    body = { message: "Appreciated, but too vague to file anything useful. Add a bit more detail about what you experienced.", created: 0 };
+                  } else {
+                    body = { message: acknowledgeAnecdotal(message), created };
+                  }
+                } catch (agentErr) {
+                  return new Response(
+                    JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
+                    { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
+                  );
                 }
-              } catch (agentErr) {
-                return new Response(
-                  JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
-                  { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
-                );
               }
             }
           }
