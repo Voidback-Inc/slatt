@@ -322,9 +322,8 @@ export default function ChatScreen() {
 
   // IAP connection lifecycle
   useEffect(() => {
-    let teardown: (() => void) | undefined;
-    setupIAP().then(fn => { teardown = fn; });
-    return () => teardown?.();
+    const teardown = setupIAP();
+    return teardown;
   }, []);
 
   // Resume a conversation navigated-to from history

@@ -101,9 +101,8 @@ export default function SettingsScreen() {
   useEffect(() => { loadProfile(); }, []);
 
   useEffect(() => {
-    let teardown: (() => void) | undefined;
-    setupIAP().then(fn => { teardown = fn; });
-    return () => teardown?.();
+    const teardown = setupIAP();
+    return teardown;
   }, []);
 
   const loadProfile = async () => {
