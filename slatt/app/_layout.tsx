@@ -63,10 +63,17 @@ export default function RootLayout() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setInitialized(true);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+    }).catch(() => {
+      setSession(null);
       setInitialized(true);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
+        setSession(session);
+        setInitialized(true);
+      }
+      if (event === 'SIGNED_OUT') setSession(null);
     });
     return () => subscription.unsubscribe();
   }, []);
