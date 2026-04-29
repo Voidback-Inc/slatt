@@ -45,8 +45,7 @@
         {
           "faceIDPermission": "Allow slatt to use Face ID to confirm your identity when deleting your account."
         }
-      ],
-      "react-native-purchases"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
