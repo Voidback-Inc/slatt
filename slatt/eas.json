@@ -11,7 +11,8 @@
   "submit": {
     "production": {
       "ios": {
-        "companyName": "Voidback, Inc."
+        "companyName": "Voidback, Inc.",
+        "ascAppId": "6761900934"
       }
     }
   },
