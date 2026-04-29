@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, Platform, KeyboardAvoidingView,
+  StyleSheet, Platform, KeyboardAvoidingView, Alert,
   ActivityIndicator, Modal, Keyboard, Pressable, Linking, Share,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -472,17 +472,8 @@ export default function ChatScreen() {
     convIdRef.current = null;
   };
 
-  const handleUpgrade = async (plan: PlanKey) => {
-    setCheckoutLoading(plan);
-    try {
-      await purchasePlan(plan);
-      setShowPaywall(false);
-      await loadProfile();
-    } catch {
-      // user cancelled or IAP error — do nothing
-    } finally {
-      setCheckoutLoading(null);
-    }
+  const handleUpgrade = async (_plan: PlanKey) => {
+    Alert.alert('Coming soon', 'In-app purchases will be available in the next update.');
   };
 
   return (
