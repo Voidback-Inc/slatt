@@ -494,6 +494,7 @@ Deno.serve(async (req) => {
     } else if (action === 'ask') {
       try {
         const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+        await withTimeout(agent.setSystemPrompt(SYSTEM_PROMPT), 10000).catch(() => {});
         const result = await withTimeout(agent.chat(message, history), 25000);
         body = { response: result.response, relevant_entities: result.relevant_entities };
       } catch (agentErr) {
