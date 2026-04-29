@@ -1,174 +1,247 @@
-<div align="center">
+# slatt — Collective Intelligence
 
-<img src="slatt/assets/images/icon.png" style="width: 100px; border-radius: 20px;" class="rounded-xl" alt="slatt" />
+<p align="center">
+  <img src="./assets/images/icon.png" width="100" style="border-radius:22px" />
+</p>
 
-# slatt
+**slatt** is a mobile app that lets people teach a shared AI agent and ask it anything. It grows smarter as contributors add knowledge, and it stays objective by fact-checking claims, labelling anecdotal experiences, and citing sources.
 
-**Your camera. No one else's.**
-
-An open-source iOS camera vault for all those wild nights —
-shoot freely, lock privately, share nothing.
-
-![Open Source](https://img.shields.io/badge/Open%20Source-yes-30d158?style=flat-square&labelColor=0e0e0e)
-![No Internet](https://img.shields.io/badge/Internet-none-30d158?style=flat-square&labelColor=0e0e0e)
-![No Analytics](https://img.shields.io/badge/Analytics-none-30d158?style=flat-square&labelColor=0e0e0e)
-![Auth](https://img.shields.io/badge/Auth-Face%20ID%20Only-white?style=flat-square&labelColor=0e0e0e)
-![Platform](https://img.shields.io/badge/Platform-iOS-white?style=flat-square&labelColor=0e0e0e)
-![Version](https://img.shields.io/badge/Version-1.0.4-555?style=flat-square&labelColor=0e0e0e)
-
-</div>
+Built by **Datou** at [Voidback, Inc.](https://github.com/Voidback-Inc)
 
 ---
 
-## What is slatt?
+## How it works
 
-slatt is a private camera app. You shoot photos and videos. They go into a biometric-locked vault on your device. They never leave unless you say so — and even then, you have to prove it's you again.
-
-No cloud. No backup. No trail. No account. No internet connection of any kind, ever.
-
-> *An open-source iOS app that aims to be the perfect vault for all those wild nights — you don't have to worry about accidentally sharing pictures or videos.*
+- **TEACH mode** — you share something you know. The agent evaluates it (AI fact-check + quality gate), optionally asks for a source, then ingests it into a shared knowledge graph.
+- **ASK mode** — you ask anything. The agent answers using its collective knowledge plus its own pre-trained knowledge, citing sources and flagging anecdotal content when relevant.
+- **Anecdotal experiences** — personal accounts are stored with an `[ANECDOTAL EXPERIENCE]` tag. When surfaced, the agent always makes clear it's one person's story and gives an honest truth analysis.
 
 ---
 
-## Features
+## Features (v1.0.6)
 
-### 🔒 Vault — Face ID Only, No Exceptions
+### Chat
+- TEACH / ASK modes with a shared collective knowledge graph
+- Long-press any message to copy or share via the native share sheet
+- Retry button on network failures — restores your last message and resends
+- Clickable URLs in agent responses open in the browser
+- Input sits flush above the tab bar with a consistent 20px gap
 
-The vault enforces biometric authentication every single time it opens. Passcode fallback is **permanently disabled** — `disableDeviceFallback: true` is hardcoded and the fallback button is hidden entirely. If the device has no enrolled biometrics, the vault shows a clear message directing you to Settings. There is no workaround.
+### History
+- All conversations are stored locally and grouped by day
+- Tap any entry to open the full conversation in a modal
+- Continue any past conversation — chat screen resumes with full context
+- Free users who have hit their daily limit see an upgrade prompt instead of the continue button
 
-### 📷 Camera
+### Settings
+- **Credits ring** — free users see a colour-coded circular progress ring (green → amber → red) showing remaining daily queries
+- **Pro badge** — Pro users see a gold "⚡ PRO" badge
+- **Change password** — sends an OTP to your email, then lets you set a new password
+- **Delete account** — Face ID / passcode confirmation + OTP verification; Pro users see a no-refund warning; Stripe subscription is cancelled automatically
+- Privacy policy and terms of service expandable inline
 
-- **Tap** the shutter → take a photo
-- **Hold** the shutter → record video (up to 60 seconds)
-- **Slide up** during recording → zoom
-- **Double-tap the viewfinder** with a second finger → flip cameras without stopping recording
-- Front camera uses a software white-screen flash. Back camera uses the hardware LED torch during active recording only — never during photo standby.
-
-### 🌀 60-Second Recording Ring
-
-A progress arc grows clockwise around the shutter ring, filling completely at the 60-second mark. No timers, no numbers — just a clean visual indicator.
-
-### 🗂️ Private Vault Gallery
-
-- **All / Photos / Videos** tab bar
-- 3-column flush grid, sorted newest first
-- Tap any item → full-screen lightbox
-- **Photos**: swipe down to dismiss, double-tap to zoom 2.2×, single tap to toggle toolbar
-- **Videos**: custom player with scrubber, play/pause, mute toggle — no native controls
-- Long-press any item → multi-select → bulk delete with confirmation
-
-### 📤 Export to Photos — Re-Auth Required
-
-Saving media back to your Camera Roll requires a **second Face ID confirmation** with its own purpose string. Accidental exports are impossible by design.
-
-### 🛡️ On-Device Storage
-
-Media is stored in the app's private `documentDirectory` with a cryptographically random UUID filename. On iOS this is protected by **iOS Data Protection** (AES-256 backed by the Secure Enclave) — files are inaccessible when the device is locked.
-
-### 🌑 Zero Network Access
-
-No APIs. No SDKs that phone home. No crash reporters. No analytics. No advertising. slatt does not make a single network request under any circumstance.
+### Auth
+- OTP-only sign-in, sign-up, and password reset (no magic links)
 
 ---
 
-## What slatt does not do
+## Stack
 
-| | |
+| Layer | Technology |
 |---|---|
-| ✗ | Collect your data — not even anonymously |
-| ✗ | Connect to the internet — not even for crash reports |
-| ✗ | Allow passcode fallback to unlock the vault |
-| ✗ | Upload your photos or videos anywhere, ever |
-| ✗ | Require an account, email, or sign-in |
-| ✗ | Show ads or track your behaviour |
-| ✓ | All of the above — enforced in open-source code you can read |
+| App | React Native + Expo 54 (managed workflow) |
+| Routing | Expo Router v5 (file-based) |
+| Auth | Supabase Auth (OTP email) |
+| Database | Supabase Postgres (`profiles` table) |
+| AI backend | Antonlytics v2 (collective knowledge graph) |
+| AI evaluation | Claude Haiku (Anthropic API) — pre-flight teach gate |
+| Subscriptions | Stripe Checkout + webhooks |
+| Edge functions | Supabase Edge Functions (Deno) |
+| Biometrics | expo-local-authentication (Face ID + passcode fallback) |
+| Styling | React Native StyleSheet |
 
 ---
 
-## Tech Stack
+## Project structure
 
-Built on **Expo managed workflow**. Zero native dependencies. No ejecting required.
-
-| Package | Purpose |
-|---|---|
-| `expo-camera` | Photo and video capture |
-| `expo-video` | Custom video playback |
-| `expo-file-system` | Sandboxed on-device storage |
-| `expo-crypto` | UUID filename generation |
-| `expo-local-authentication` | Face ID / Touch ID enforcement |
-| `expo-media-library` | Export to Camera Roll (re-auth gated) |
-| `expo-video-thumbnails` | Video thumbnail generation in gallery |
-| `react-native-gesture-handler` | Pinch-zoom, double-tap, swipe-dismiss |
-| `react-native-svg` | 60-second recording progress ring |
-| `lucide-react-native` | Icons |
-
----
-
-## Getting Started
-
-```bash
-# clone
-git clone https://github.com/voidback/slatt
-cd slatt
-
-# install
-npm install
-
-# install expo deps
-npx expo install \
-  expo-camera expo-video expo-file-system expo-crypto \
-  expo-local-authentication expo-media-library expo-video-thumbnails \
-  react-native-gesture-handler react-native-svg lucide-react-native
-
-# start
-npx expo start
+```
+slatt/
+├── app/
+│   ├── _layout.tsx              # Root layout + AuthGate
+│   ├── (auth)/
+│   │   ├── login.tsx
+│   │   ├── signup.tsx
+│   │   └── verify.tsx           # 8-digit OTP verification
+│   └── (tabs)/
+│       ├── chat.tsx             # Main chat screen (TEACH / ASK)
+│       ├── history.tsx          # Conversation history + detail modal
+│       └── settings.tsx         # Account, billing, legal
+├── lib/
+│   ├── supabase.ts             # Supabase client + Profile type
+│   ├── history.ts              # AsyncStorage conversation persistence
+│   ├── constants.ts            # FREE_DAILY_LIMIT, Stripe labels
+│   └── legal.ts                # Privacy Policy + Terms of Service text
+├── supabase/
+│   └── functions/
+│       ├── agent/              # Core chat/teach edge function
+│       ├── checkout/           # Stripe Checkout session creator
+│       ├── stripe-webhook/     # Stripe event handler (tier updates)
+│       └── delete-account/     # Cancels Stripe sub + deletes auth user
+└── assets/
+    └── images/
 ```
 
 ---
 
-## Building for the App Store
+## Getting started
+
+### Prerequisites
+
+- Node.js 20+
+- Expo CLI: `npm install -g expo-cli`
+- EAS CLI: `npm install -g eas-cli`
+- Supabase CLI v2.95+: `brew install supabase/tap/supabase`
+- Deno 2.7+: `brew install deno`
+- An [Expo](https://expo.dev) account (for EAS builds)
+- A [Supabase](https://supabase.com) project
+- An [Antonlytics](https://antonlytics.com) project
+- An [Anthropic](https://console.anthropic.com) API key (for Claude Haiku)
+- A [Stripe](https://stripe.com) account with two prices (monthly + annual)
+
+### 1. Clone and install
 
 ```bash
-# build
+git clone https://github.com/Voidback-Inc/slatt.git
+cd slatt
+npm install
+```
+
+### 2. Environment variables
+
+Create `.env.local`:
+
+```env
+EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
+
+### 3. Supabase setup
+
+In your Supabase project, create the `profiles` table:
+
+```sql
+create table profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  tier text not null default 'free',
+  queries_today int not null default 0,
+  queries_reset_date date not null default current_date,
+  stripe_customer_id text,
+  stripe_subscription_id text
+);
+
+-- Auto-create profile on signup
+create or replace function handle_new_user()
+returns trigger as $$
+begin
+  insert into profiles (id) values (new.id);
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function handle_new_user();
+```
+
+Enable Row Level Security and add a policy allowing users to read/update their own row.
+
+### 4. Edge function secrets
+
+In Supabase → Edge Functions → Secrets, set:
+
+```
+ANTONLYTICS_API_KEY       your Antonlytics API key
+ANTONLYTICS_PROJECT_ID    your Antonlytics project ID
+ANTHROPIC_API_KEY         your Anthropic (Claude) API key
+STRIPE_SECRET_KEY         your Stripe secret key
+STRIPE_MONTHLY_PRICE_ID   Stripe price ID for $20/month plan
+STRIPE_ANNUAL_PRICE_ID    Stripe price ID for $18/month annual plan
+STRIPE_WEBHOOK_SECRET     your Stripe webhook signing secret
+SUPABASE_SERVICE_ROLE_KEY your Supabase service role key (delete-account function)
+```
+
+### 5. Deploy edge functions
+
+The edge runtime runs with `--no-remote`, so all functions must be bundled before uploading:
+
+```bash
+# Bundle
+deno bundle -o /tmp/agent.bundle.js supabase/functions/agent/index.ts
+
+# Upload (replace TOKEN and PROJECT_REF)
+curl -X PATCH \
+  -H "Authorization: Bearer YOUR_SUPABASE_MANAGEMENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary "$(jq -n --arg body "$(cat /tmp/agent.bundle.js)" '{body: $body, verify_jwt: true}')" \
+  "https://api.supabase.com/v1/projects/YOUR_PROJECT_REF/functions/agent"
+```
+
+Repeat for `checkout`, `stripe-webhook`, and `delete-account`.
+
+### 6. Stripe webhook
+
+In your Stripe dashboard, create a webhook pointing to:
+
+```
+https://YOUR_PROJECT_REF.supabase.co/functions/v1/stripe-webhook
+```
+
+Listen for:
+- `checkout.session.completed`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+- `invoice.payment_failed`
+
+### 7. Run locally
+
+```bash
+npx expo start
+```
+
+Scan the QR code with Expo Go, or press `i` for iOS simulator.
+
+---
+
+## Building + releasing
+
+```bash
+# Production build (auto-increments build number)
 eas build --platform ios --profile production
 
-# submit
+# Submit to App Store Connect / TestFlight
 eas submit --platform ios --latest
 ```
 
 ---
 
-## Permissions
+## Contributing
 
-All permission strings clearly explain the purpose and confirm data never leaves the device.
+1. Fork the repo and create a branch: `git checkout -b feature/your-feature`
+2. Make your changes — keep diffs small and focused
+3. Test on a real device if touching biometrics, keyboard behaviour, or safe area layout
+4. Open a PR against `main` with a clear description of what changed and why
 
-```json
-{
-  "cameraPermission": "slatt uses your camera to capture photos and videos. Everything you shoot is stored privately on your device and is never uploaded, shared, or sent anywhere.",
-  "microphonePermission": "slatt uses your microphone to record audio with videos. Audio is stored only on your device and is never uploaded, shared, or sent anywhere.",
-  "NSFaceIDUsageDescription": "slatt uses Face ID to protect your private vault. Your media stays on-device and is never uploaded.",
-  "NSPhotoLibraryAddUsageDescription": "slatt saves media to your Photos library only when you explicitly choose to export from the vault. No data is uploaded."
-}
-```
+### Code style
 
----
-
-## Legal
-
-slatt is fully open source. Inspect every line of code to verify the claims made here.
-
-**Voidback, Inc.**
-Incorporated in the State of Delaware, 2026
-legal@voidback.com
+- All UI is React Native StyleSheet — no Tailwind in app screens
+- No comments unless the *why* is non-obvious
+- TypeScript strict mode — no `any` except at API boundaries
+- Safe area insets via `useSafeAreaInsets()` hook inside Modals (not `SafeAreaView`, which is unreliable inside React Native's `Modal`)
 
 ---
 
-<div align="center">
+## License
 
-<img class="rounded-xl" src="slatt/assets/images/icon.png" style="width: 64px; border-radius: 20px;" alt="slatt" />
+Open source — see [LICENSE](LICENSE) for details.
 
-slatt &nbsp;·&nbsp; Voidback, Inc. &nbsp;·&nbsp; Delaware 2026
-
-*No data collected &nbsp;·&nbsp; No internet &nbsp;·&nbsp; Open source*
-
-</div>
+© 2026 Voidback, Inc.
