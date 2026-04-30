@@ -134,7 +134,11 @@ export default function SettingsScreen() {
 
   const handleSignOut = async () => {
     setSigningOut(true);
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // ignore — AuthGate will redirect regardless
+    }
     setSigningOut(false);
   };
 
@@ -550,7 +554,10 @@ export default function SettingsScreen() {
         animationType="slide"
         onRequestClose={() => setDeleteStep(null)}
       >
-        <View style={ds.overlay}>
+        <KeyboardAvoidingView
+          style={ds.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={ds.card}>
             <View style={ds.pill} />
             <Text style={ds.title}>Confirm deletion</Text>
@@ -582,7 +589,7 @@ export default function SettingsScreen() {
               <Text style={ds.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

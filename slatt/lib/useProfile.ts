@@ -8,16 +8,20 @@ export function useProfile() {
   const [userId, setUserId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setUserId(user.id);
-    setEmail(user.email ?? '');
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, tier, queries_today, queries_reset_date, stripe_customer_id, stripe_subscription_id')
-      .eq('id', user.id)
-      .single();
-    if (data) setProfile(data as Profile);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setUserId(user.id);
+      setEmail(user.email ?? '');
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, tier, queries_today, queries_reset_date, stripe_customer_id, stripe_subscription_id')
+        .eq('id', user.id)
+        .single();
+      if (data) setProfile(data as Profile);
+    } catch {
+      // Auth session gone (sign-out in progress) — ignore
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);

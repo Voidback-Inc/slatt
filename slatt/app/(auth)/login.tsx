@@ -165,17 +165,17 @@ export default function LoginScreen() {
             onPress={signIn}
             disabled={!ready}
             activeOpacity={0.84}
-            style={s.btnOuter}
+            style={[s.btnOuter, !ready && { opacity: 0.35 }]}
           >
             <LinearGradient
-              colors={ready ? GRAD : (['#141414', '#141414'] as const)}
+              colors={GRAD}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={s.btn}
             >
               {loading
                 ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={[s.btnText, !ready && s.btnTextDim]}>Sign in</Text>}
+                : <Text style={s.btnText}>Sign in</Text>}
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -204,8 +204,6 @@ const s = StyleSheet.create({
     position: 'absolute', top: -20,
     width: 200, height: 200, borderRadius: 100,
     backgroundColor: 'transparent',
-    shadowColor: '#1D9BF0', shadowOpacity: 0.55,
-    shadowRadius: 70, shadowOffset: { width: 0, height: 0 },
   },
   ring: {
     width: RING_SIZE, height: RING_SIZE, borderRadius: 26,
