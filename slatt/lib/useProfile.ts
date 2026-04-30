@@ -22,19 +22,5 @@ export function useProfile() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Realtime: instantly reflect any DB change (e.g. from RevenueCat webhook or purchase)
-  useEffect(() => {
-    if (!userId) return;
-    const channel = supabase
-      .channel(`profile:${userId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
-        (payload) => { setProfile(payload.new as Profile); },
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [userId]);
-
   return { profile, email, userId, reloadProfile: load };
 }
