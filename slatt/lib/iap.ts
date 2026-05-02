@@ -39,12 +39,12 @@ export function setupIAP(): () => void {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) rc.logIn(user.id).catch(() => {});
     });
-    const sub = rc.addCustomerInfoUpdateListener(async (info: any) => {
+    rc.addCustomerInfoUpdateListener(async (info: any) => {
       const hasActive = Object.keys(info.entitlements.active).length > 0;
       if (hasActive) await activatePro();
       else await deactivatePro();
     });
-    return () => sub.remove();
+    return () => {};
   } catch (e) {
     console.warn('[IAP] setup failed:', e);
     return () => {};

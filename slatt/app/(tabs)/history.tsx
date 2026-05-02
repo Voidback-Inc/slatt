@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView,
   StyleSheet, Alert, Modal, Share,
@@ -192,20 +192,30 @@ export default function HistoryScreen() {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [selected, setSelected] = useState<Conversation | null>(null);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    return () => { mounted.current = false; };
+  }, []);
 
   const load = useCallback(async () => {
-    const [data, { data: { user } }] = await Promise.all([
-      loadConversations(),
-      supabase.auth.getUser(),
-    ]);
-    setConvs(data);
-    if (user) {
-      const { data: p } = await supabase
-        .from('profiles')
-        .select('id, tier, queries_today, queries_reset_date, stripe_customer_id, stripe_subscription_id')
-        .eq('id', user.id)
-        .single();
-      if (p) setProfile(p as Profile);
+    try {
+      const [data, { data: { user } }] = await Promise.all([
+        loadConversations(),
+        supabase.auth.getUser(),
+      ]);
+      if (!mounted.current) return;
+      setConvs(data);
+      if (user) {
+        const { data: p } = await supabase
+          .from('profiles')
+          .select('id, tier, queries_today, queries_reset_date, stripe_customer_id, stripe_subscription_id')
+          .eq('id', user.id)
+          .single();
+        if (p && mounted.current) setProfile(p as Profile);
+      }
+    } catch {
+      // Auth session gone (sign-out in progress)
     }
   }, []);
 

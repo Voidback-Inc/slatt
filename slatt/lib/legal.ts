@@ -54,7 +54,7 @@ You must create an account to use the App. You are responsible for maintaining t
 
 3. SUBSCRIPTION PLANS
   Free Plan: Up to 30 queries per day (teaches + asks combined). Access to the collective knowledge base.
-  Pro Plan: Unlimited queries. $20/month or $18/month billed annually ($216/year). Billed via Stripe. You may cancel at any time; cancellation takes effect at the end of the current billing period.
+  Pro Plan: Unlimited queries. $5/month or $50/year billed annually. Billed via Apple In-App Purchase. Payment is charged to your Apple ID account at confirmation of purchase. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Manage or cancel in Settings → Apple ID → Subscriptions. You may cancel at any time; cancellation takes effect at the end of the current billing period.
 
 4. REFUNDS
 Subscription fees are non-refundable except where required by applicable law.

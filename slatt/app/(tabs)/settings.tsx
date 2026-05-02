@@ -9,7 +9,7 @@ import { Image } from 'react-native';
 import { ChevronDown, Shield, FileText, ExternalLink, LogOut, Trash2 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
-import { setupIAP, purchasePlan, restorePurchases, type PlanKey } from '@/lib/iap';
+import { purchasePlan, restorePurchases, type PlanKey } from '@/lib/iap';
 import { useProfile } from '@/lib/useProfile';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
 import Logo from '@/assets/images/icon.png';
@@ -98,10 +98,6 @@ export default function SettingsScreen() {
   const [showNewPw, setShowNewPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
 
-  useEffect(() => {
-    const teardown = setupIAP();
-    return teardown;
-  }, []);
 
   const handleUpgrade = async (plan: PlanKey) => {
     setUpgradeLoading(plan);
@@ -136,10 +132,10 @@ export default function SettingsScreen() {
     setSigningOut(true);
     try {
       await supabase.auth.signOut();
+      // AuthGate navigates away — do NOT update state here (unmounted component crash)
     } catch {
-      // ignore — AuthGate will redirect regardless
+      setSigningOut(false); // only reset on failure; success unmounts this component
     }
-    setSigningOut(false);
   };
 
   const runDeleteFlow = async () => {
@@ -199,7 +195,11 @@ export default function SettingsScreen() {
         token: deleteOtp,
         type: 'email',
       });
-      if (verifyErr) { Alert.alert('Invalid code', verifyErr.message); return; }
+      if (verifyErr) {
+        Alert.alert('Invalid code', verifyErr.message);
+        setDeleteLoading(false);
+        return;
+      }
 
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(
@@ -209,11 +209,12 @@ export default function SettingsScreen() {
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         Alert.alert('Error', (j as any).error ?? 'Failed to delete account.');
+        setDeleteLoading(false);
         return;
       }
-      // AuthGate will redirect to login after signOut
+      // signOut triggers navigation — do NOT update state after this (unmounted component crash)
       await supabase.auth.signOut();
-    } finally {
+    } catch {
       setDeleteLoading(false);
     }
   };

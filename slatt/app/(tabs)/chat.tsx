@@ -3,17 +3,16 @@ import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, Platform, KeyboardAvoidingView, Alert,
   ActivityIndicator, Modal, Keyboard, Pressable, Linking, Share,
+  Animated as RNAnimated, PanResponder,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 import Animated, {
   FadeInDown, FadeIn,
   useSharedValue, useAnimatedStyle,
   withRepeat, withSequence, withTiming,
 } from 'react-native-reanimated';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
@@ -21,6 +20,7 @@ import { upsertConversation, consumePendingResume } from '@/lib/history';
 import { FREE_DAILY_LIMIT, STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
 import { setupIAP, purchasePlan, type PlanKey } from '@/lib/iap';
 import { useProfile } from '@/lib/useProfile';
+import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
 
 const T = {
   bg: '#000',
@@ -39,9 +39,8 @@ const T = {
 
 const GRAD_USER: [string, string] = ['#1D9BF0', '#8B5CF6'];
 const GRAD_SEND: [string, string] = ['#1D9BF0', '#8B5CF6'];
-const GRAD_SEND_OFF: [string, string] = ['#161616', '#161616'];
 
-// ── Query ring (free plan) ────────────────────────────────────────────────────
+// ── Query ring ────────────────────────────────────────────────────────────────
 
 function QueryRing({ left, total, onPress }: { left: number; total: number; onPress: () => void }) {
   const size = 28;
@@ -90,6 +89,58 @@ const pb = StyleSheet.create({
   text: { color: '#000', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
 });
 
+// ── Swipeable message wrapper ─────────────────────────────────────────────────
+
+function SwipeableMessage({ onReply, children }: { onReply: () => void; children: React.ReactNode }) {
+  const translateX = useRef(new RNAnimated.Value(0)).current;
+  const triggered = useRef(false);
+  const onReplyRef = useRef(onReply);
+  onReplyRef.current = onReply;
+
+  const iconOpacity = translateX.interpolate({ inputRange: [0, 40], outputRange: [0, 1], extrapolate: 'clamp' });
+  const iconScale = translateX.interpolate({ inputRange: [0, 40], outputRange: [0.5, 1], extrapolate: 'clamp' });
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, { dx, dy }) => dx > 8 && Math.abs(dx) > Math.abs(dy) * 1.5,
+    onPanResponderGrant: () => { triggered.current = false; },
+    onPanResponderMove: (_, { dx }) => {
+      if (dx <= 0) return;
+      const v = Math.min(dx * 0.6, 52);
+      translateX.setValue(v);
+      if (v >= 40 && !triggered.current) {
+        triggered.current = true;
+        onReplyRef.current();
+      }
+    },
+    onPanResponderRelease: () => {
+      RNAnimated.spring(translateX, { toValue: 0, useNativeDriver: true, tension: 200, friction: 14 }).start();
+      triggered.current = false;
+    },
+    onPanResponderTerminate: () => {
+      RNAnimated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+      triggered.current = false;
+    },
+  })).current;
+
+  return (
+    <View>
+      <RNAnimated.View style={[sr.icon, { opacity: iconOpacity, transform: [{ scale: iconScale }] }]}>
+        <Feather name="corner-up-left" size={15} color="rgba(255,255,255,0.35)" />
+      </RNAnimated.View>
+      <RNAnimated.View style={{ transform: [{ translateX }] }} {...pan.panHandlers}>
+        {children}
+      </RNAnimated.View>
+    </View>
+  );
+}
+
+const sr = StyleSheet.create({
+  icon: { position: 'absolute', left: 6, top: 0, bottom: 0, justifyContent: 'center', width: 28 },
+});
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 type Mode = 'teach' | 'ask';
 
 type Message = {
@@ -98,6 +149,7 @@ type Message = {
   content: string;
   mode: Mode;
   isError?: boolean;
+  replyToId?: string;
 };
 
 function detectMode(text: string): Mode {
@@ -107,7 +159,7 @@ function detectMode(text: string): Mode {
   return 'teach';
 }
 
-// ── Markdown renderer ────────────────────────────────────────────────────────
+// ── Markdown renderer ─────────────────────────────────────────────────────────
 
 function parseInline(text: string, baseStyle: object): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
@@ -119,7 +171,7 @@ function parseInline(text: string, baseStyle: object): React.ReactNode[] {
     if (m.index > last) parts.push(text.slice(last, m.index));
     const raw = m[0];
     if (raw.startsWith('**')) {
-      parts.push(<Text key={key++} style={[baseStyle, { fontWeight: '800' }]}>{raw.slice(2, -2)}</Text>);
+      parts.push(<Text key={key++} style={[baseStyle, { fontWeight: '700', color: '#fff' }]}>{raw.slice(2, -2)}</Text>);
     } else if (raw.startsWith('*')) {
       parts.push(<Text key={key++} style={[baseStyle, { fontStyle: 'italic' }]}>{raw.slice(1, -1)}</Text>);
     } else if (raw.startsWith('`')) {
@@ -129,7 +181,6 @@ function parseInline(text: string, baseStyle: object): React.ReactNode[] {
         </Text>
       );
     } else {
-      // URL — strip trailing punctuation that isn't part of the URL
       const url = raw.replace(/[.,;:!?)'"\]]+$/, '');
       const trailing = raw.slice(url.length);
       parts.push(
@@ -166,7 +217,7 @@ function MarkdownText({ text, style }: { text: string; style: object }) {
   return <View style={{ gap: 2 }}>{nodes}</View>;
 }
 
-// ── Typing indicator ─────────────────────────────────────────────────────────
+// ── Typing indicator ──────────────────────────────────────────────────────────
 
 function TypingDots() {
   const d1 = useSharedValue(0.3);
@@ -177,8 +228,7 @@ function TypingDots() {
     const anim = () =>
       withRepeat(
         withSequence(withTiming(1, { duration: 360 }), withTiming(0.3, { duration: 360 })),
-        -1,
-        false,
+        -1, false,
       );
     d1.value = anim();
     const t2 = setTimeout(() => { d2.value = anim(); }, 130);
@@ -203,16 +253,19 @@ function TypingDots() {
 }
 
 const td = StyleSheet.create({
-  row: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 20, paddingBottom: 10,
-  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingBottom: 10 },
   label: { color: T.faint, fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
   dots: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   dot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: T.muted },
 });
 
 // ── Paywall modal ─────────────────────────────────────────────────────────────
+
+const PRO_FEATURES = [
+  `Unlimited queries per day (Free plan: ${FREE_DAILY_LIMIT}/day)`,
+  'Access all collective knowledge — answers from real Pro member teachings',
+  'Teach the collective — your insights reach every Pro member',
+];
 
 function PaywallModal({
   visible, queriesLeft, onClose, onUpgrade, checkoutLoading,
@@ -223,29 +276,46 @@ function PaywallModal({
   onUpgrade: (plan: 'monthly' | 'annual') => void;
   checkoutLoading: 'monthly' | 'annual' | null;
 }) {
+  const [legalModal, setLegalModal] = useState<'terms' | 'privacy' | null>(null);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={pw.overlay}>
         <View style={pw.card}>
           <View style={pw.pill} />
-          <Text style={pw.title}>Upgrade to Pro</Text>
+          <Text style={pw.title}>slatt Pro</Text>
           <Text style={pw.sub}>
             {queriesLeft === 0
-              ? `You've used all ${FREE_DAILY_LIMIT} daily queries.`
-              : `${queriesLeft} of ${FREE_DAILY_LIMIT} queries left today.`}
-            {'\n'}Go Pro for unlimited access to the collective.
+              ? `You've used all ${FREE_DAILY_LIMIT} free daily queries.`
+              : `${queriesLeft} of ${FREE_DAILY_LIMIT} free queries left today.`}
+            {' '}Upgrade for unlimited access.
           </Text>
+
+          <View style={pw.features}>
+            {PRO_FEATURES.map(f => (
+              <View key={f} style={pw.featureRow}>
+                <Text style={pw.featureCheck}>✓</Text>
+                <Text style={pw.featureText}>{f}</Text>
+              </View>
+            ))}
+          </View>
 
           <TouchableOpacity
             onPress={() => onUpgrade('monthly')}
             disabled={checkoutLoading !== null}
             activeOpacity={0.85}
-            style={pw.btnOuter}
+            style={[pw.btnOuter, checkoutLoading !== null && { opacity: 0.6 }]}
           >
             <LinearGradient colors={GRAD_SEND} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={pw.btnGrad}>
               {checkoutLoading === 'monthly'
                 ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={pw.btnTextPrimary}>{STRIPE_MONTHLY_LABEL}</Text>}
+                : (
+                  <View style={{ alignItems: 'center' }}>
+                    <Text style={pw.btnSubLabel}>slatt Pro · Monthly</Text>
+                    <Text style={pw.btnTextPrimary}>{STRIPE_MONTHLY_LABEL}</Text>
+                    <Text style={pw.btnSub}>Auto-renews monthly · Cancel anytime</Text>
+                  </View>
+                )}
             </LinearGradient>
           </TouchableOpacity>
 
@@ -253,27 +323,56 @@ function PaywallModal({
             onPress={() => onUpgrade('annual')}
             disabled={checkoutLoading !== null}
             activeOpacity={0.85}
-            style={pw.btnOuter}
+            style={[pw.btnOuter, checkoutLoading !== null && { opacity: 0.6 }]}
           >
             <View style={pw.btnAnnual}>
               {checkoutLoading === 'annual'
                 ? <ActivityIndicator color={T.text} size="small" />
                 : (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={pw.btnText}>{STRIPE_ANNUAL_LABEL}</Text>
-                    <View style={pw.badge}>
-                      <Text style={pw.badgeText}>{STRIPE_ANNUAL_SAVE}</Text>
+                  <View style={{ alignItems: 'center' }}>
+                    <Text style={pw.btnSubLabelMuted}>slatt Pro · Annual</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={pw.btnText}>{STRIPE_ANNUAL_LABEL}</Text>
+                      <View style={pw.badge}>
+                        <Text style={pw.badgeText}>{STRIPE_ANNUAL_SAVE}</Text>
+                      </View>
                     </View>
+                    <Text style={pw.btnSubMuted}>Auto-renews annually · Cancel anytime</Text>
                   </View>
                 )}
             </View>
           </TouchableOpacity>
+
+          <Text style={pw.legal}>
+            Payment is charged to your Apple ID account at confirmation of purchase. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Manage or cancel in Settings → Apple ID → Subscriptions.{'\n'}
+            <Text style={pw.legalLink} onPress={() => setLegalModal('terms')}>Terms of Use</Text>
+            {'  ·  '}
+            <Text style={pw.legalLink} onPress={() => setLegalModal('privacy')}>Privacy Policy</Text>
+          </Text>
 
           <TouchableOpacity style={pw.dismiss} onPress={onClose}>
             <Text style={pw.dismissText}>Maybe later</Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      <Modal visible={legalModal !== null} transparent animationType="slide" onRequestClose={() => setLegalModal(null)}>
+        <View style={pw.legalOverlay}>
+          <View style={pw.legalCard}>
+            <View style={pw.legalHeader}>
+              <Text style={pw.legalTitle}>{legalModal === 'terms' ? 'Terms of Use' : 'Privacy Policy'}</Text>
+              <TouchableOpacity onPress={() => setLegalModal(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={pw.legalDone}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={pw.legalText}>
+                {legalModal === 'terms' ? TERMS_OF_SERVICE : PRIVACY_POLICY}
+              </Text>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -282,51 +381,81 @@ const pw = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.65)' },
   card: {
     backgroundColor: '#0D0D0D', borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: 28, paddingTop: 14,
+    padding: 24, paddingTop: 14,
     borderWidth: StyleSheet.hairlineWidth, borderBottomWidth: 0,
     borderColor: 'rgba(255,255,255,0.08)',
   },
-  pill: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'center', marginBottom: 24 },
-  title: { color: T.text, fontSize: 24, fontWeight: '800', letterSpacing: -0.5, marginBottom: 10 },
-  sub: { color: T.muted, fontSize: 14, lineHeight: 22, marginBottom: 28 },
+  pill: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'center', marginBottom: 20 },
+  title: { color: T.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.5, marginBottom: 6 },
+  sub: { color: T.muted, fontSize: 14, lineHeight: 20, marginBottom: 16 },
+  features: { gap: 8, marginBottom: 20 },
+  featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  featureCheck: { color: T.teach, fontSize: 14, fontWeight: '700', width: 16 },
+  featureText: { color: 'rgba(255,255,255,0.75)', fontSize: 14, lineHeight: 20 },
   btnOuter: { borderRadius: 16, overflow: 'hidden', marginBottom: 10 },
-  btnGrad: { height: 54, alignItems: 'center', justifyContent: 'center' },
+  btnGrad: { minHeight: 54, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
+  btnSubLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '600', marginBottom: 2 },
+  btnSubLabelMuted: { color: 'rgba(255,255,255,0.45)', fontSize: 11, fontWeight: '600', marginBottom: 2 },
   btnTextPrimary: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.1 },
+  btnSub: { color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 2 },
   btnAnnual: {
-    height: 54, alignItems: 'center', justifyContent: 'center',
+    minHeight: 54, paddingVertical: 10, alignItems: 'center', justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 16,
   },
   btnText: { color: T.text, fontSize: 15, fontWeight: '600' },
+  btnSubMuted: { color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 2 },
   badge: { backgroundColor: 'rgba(245,200,66,0.14)', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
   badgeText: { color: T.pro, fontSize: 10, fontWeight: '700' },
-  dismiss: { alignItems: 'center', paddingVertical: 16 },
+  legal: {
+    color: 'rgba(255,255,255,0.25)', fontSize: 11, lineHeight: 16,
+    textAlign: 'center', paddingHorizontal: 4, marginBottom: 4,
+  },
+  legalLink: { color: 'rgba(255,255,255,0.45)', fontWeight: '600', textDecorationLine: 'underline' },
+  dismiss: { alignItems: 'center', paddingVertical: 14 },
   dismissText: { color: T.muted, fontSize: 14 },
+  legalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  legalCard: {
+    backgroundColor: '#0D0D0D', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 20, maxHeight: '85%',
+    borderWidth: StyleSheet.hairlineWidth, borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  legalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  legalTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  legalDone: { color: T.ask, fontSize: 14, fontWeight: '600' },
+  legalText: {
+    color: 'rgba(255,255,255,0.55)', fontSize: 11, lineHeight: 17,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    paddingBottom: 40,
+  },
 });
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function ChatScreen() {
-  const tabBarHeight = useBottomTabBarHeight();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<Mode>('teach');
   const [manualMode, setManualMode] = useState(false);
   const [sending, setSending] = useState(false);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
   const { profile, reloadProfile } = useProfile();
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<PlanKey | null>(null);
-  const [kbVisible, setKbVisible] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const convIdRef = useRef<string | null>(null);
   const lastSentRef = useRef<{ text: string; mode: Mode } | null>(null);
+  const mounted = useRef(true);
 
-  // IAP connection lifecycle
+  useEffect(() => {
+    return () => { mounted.current = false; };
+  }, []);
+
   useEffect(() => {
     const teardown = setupIAP();
     return teardown;
   }, []);
 
-  // Resume a conversation navigated-to from history
   useFocusEffect(useCallback(() => {
     const conv = consumePendingResume();
     if (conv) {
@@ -336,15 +465,14 @@ export default function ChatScreen() {
     }
   }, []));
 
-  // Track keyboard visibility to adjust input padding dynamically
   useEffect(() => {
     const show = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      () => setKbVisible(true),
+      () => {},
     );
     const hide = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setKbVisible(false),
+      () => {},
     );
     return () => { show.remove(); hide.remove(); };
   }, []);
@@ -392,8 +520,16 @@ export default function ChatScreen() {
     if (isAtLimit) { setShowPaywall(true); return; }
 
     lastSentRef.current = { text, mode };
+    const capturedReply = replyTo;
+    setReplyTo(null);
 
-    const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: text, mode };
+    const userMsg: Message = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: text,
+      mode,
+      replyToId: capturedReply?.id,
+    };
     const withUser = [...messages, userMsg];
     setMessages(withUser);
     setInput('');
@@ -407,6 +543,10 @@ export default function ChatScreen() {
         content: m.content,
       }));
 
+      const messageForAgent = capturedReply
+        ? `[Replying to: "${capturedReply.content.slice(0, 200)}"]\n\n${text}`
+        : text;
+
       const res = await fetch(
         `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/agent`,
         {
@@ -415,18 +555,18 @@ export default function ChatScreen() {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${session?.access_token}`,
           },
-          body: JSON.stringify({ action: mode, message: text, history }),
+          body: JSON.stringify({ action: mode, message: messageForAgent, history }),
         },
       );
 
       if (res.status === 429) {
-        setShowPaywall(true);
+        if (mounted.current) setShowPaywall(true);
         reloadProfile();
         return;
       }
 
       let json: any = {};
-      try { json = await res.json(); } catch { /* non-JSON body (e.g. 502 gateway error) */ }
+      try { json = await res.json(); } catch { }
       if (!res.ok) throw new Error(json.error ?? json.message ?? `Server error ${res.status}`);
 
       const content = mode === 'teach'
@@ -435,26 +575,30 @@ export default function ChatScreen() {
 
       const agentMsg: Message = { id: `a-${Date.now()}`, role: 'agent', content, mode };
       const final = [...withUser, agentMsg];
-      setMessages(final);
-      persistConversation(final);
+      if (mounted.current) {
+        setMessages(final);
+        persistConversation(final);
+      }
       reloadProfile();
 
     } catch (err) {
+      if (!mounted.current) return;
       const msg = err instanceof Error ? err.message : 'Unable to connect. Check your connection.';
       setMessages(prev => [
         ...prev,
         { id: `e-${Date.now()}`, role: 'agent', content: msg, mode, isError: true },
       ]);
     } finally {
-      setSending(false);
+      if (mounted.current) setSending(false);
     }
-  }, [input, mode, sending, isAtLimit, messages]);
+  }, [input, mode, sending, isAtLimit, messages, replyTo]);
 
   const newChat = () => {
     setMessages([]);
     setInput('');
     setManualMode(false);
     setMode('teach');
+    setReplyTo(null);
     convIdRef.current = null;
   };
 
@@ -462,14 +606,14 @@ export default function ChatScreen() {
     setCheckoutLoading(plan);
     try {
       await purchasePlan(plan);
-      setShowPaywall(false);
+      if (mounted.current) setShowPaywall(false);
       await reloadProfile();
     } catch (e: any) {
-      if (!e?.userCancelled) {
+      if (!e?.userCancelled && mounted.current) {
         Alert.alert('Purchase failed', e?.message ?? 'Something went wrong. Please try again.');
       }
     } finally {
-      setCheckoutLoading(null);
+      if (mounted.current) setCheckoutLoading(null);
     }
   };
 
@@ -500,30 +644,30 @@ export default function ChatScreen() {
         {/* ── Messages or empty state ── */}
         {messages.length === 0 ? (
           <Pressable style={{ flex: 1 }} onPress={Keyboard.dismiss}>
-          <Animated.View entering={FadeIn.duration(400)} style={s.empty}>
-            <Text style={s.emptyWordmark}>slatt</Text>
-            <Text style={s.emptyTagline}>COLLECTIVE INTELLIGENCE</Text>
-            <Text style={s.emptySub}>
-              Share what you know or ask what you want to know.{'\n'}
-              Every Pro member's insight lives here.
-            </Text>
-            <View style={s.hints}>
-              <View style={s.hintCard}>
-                <View style={[s.hintDot, { backgroundColor: T.teach }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.hintMode, { color: T.teach }]}>TEACH</Text>
-                  <Text style={s.hintEx}>"Closed a $2M deal by sending proposals as Notion pages."</Text>
+            <Animated.View entering={FadeIn.duration(400)} style={s.empty}>
+              <Text style={s.emptyWordmark}>slatt</Text>
+              <Text style={s.emptyTagline}>COLLECTIVE INTELLIGENCE</Text>
+              <Text style={s.emptySub}>
+                Share what you know or ask what you want to know.{'\n'}
+                Every Pro member's insight lives here.
+              </Text>
+              <View style={s.hints}>
+                <View style={s.hintCard}>
+                  <View style={[s.hintDot, { backgroundColor: T.teach }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.hintMode, { color: T.teach }]}>TEACH</Text>
+                    <Text style={s.hintEx}>"Closed a $2M deal by sending proposals as Notion pages."</Text>
+                  </View>
+                </View>
+                <View style={s.hintCard}>
+                  <View style={[s.hintDot, { backgroundColor: T.ask }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.hintMode, { color: T.ask }]}>ASK</Text>
+                    <Text style={s.hintEx}>"What's the best way to present a big proposal?"</Text>
+                  </View>
                 </View>
               </View>
-              <View style={s.hintCard}>
-                <View style={[s.hintDot, { backgroundColor: T.ask }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.hintMode, { color: T.ask }]}>ASK</Text>
-                  <Text style={s.hintEx}>"What's the best way to present a big proposal?"</Text>
-                </View>
-              </View>
-            </View>
-          </Animated.View>
+            </Animated.View>
           </Pressable>
         ) : (
           <ScrollView
@@ -534,51 +678,68 @@ export default function ChatScreen() {
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
           >
-            {messages.map(msg =>
-              msg.role === 'user' ? (
-                <Animated.View key={msg.id} entering={FadeInDown.duration(220)} style={s.msgUserWrap}>
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onLongPress={() => Share.share({ message: msg.content })}
-                    delayLongPress={400}
-                  >
-                    <LinearGradient
-                      colors={GRAD_USER}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={s.msgUser}
-                    >
-                      <Text style={s.msgTextUser}>{msg.content}</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </Animated.View>
-              ) : (
-                <Animated.View
-                  key={msg.id}
-                  entering={FadeInDown.duration(220)}
-                  style={[s.msgAgent, msg.isError && s.msgAgentError]}
-                >
-                  <Text style={s.agentLabel}>{msg.isError ? '⚠  error' : 'slatt'}</Text>
-                  {msg.isError ? (
-                    <>
-                      <Text style={[s.msgTextAgent, s.msgTextError]}>{msg.content}</Text>
-                      <TouchableOpacity onPress={retryLast} style={s.retryBtn} activeOpacity={0.7}>
-                        <Feather name="refresh-cw" size={11} color="#FF6B6B" />
-                        <Text style={s.retryText}>Retry</Text>
-                      </TouchableOpacity>
-                    </>
-                  ) : (
+            {messages.map(msg => {
+              const replyMsg = msg.replyToId ? messages.find(m => m.id === msg.replyToId) : undefined;
+
+              return msg.role === 'user' ? (
+                <SwipeableMessage key={msg.id} onReply={() => setReplyTo(msg)}>
+                  <Animated.View entering={FadeInDown.duration(220)} style={s.msgUserWrap}>
                     <TouchableOpacity
-                      activeOpacity={1}
+                      activeOpacity={0.85}
                       onLongPress={() => Share.share({ message: msg.content })}
                       delayLongPress={400}
                     >
-                      <MarkdownText text={msg.content} style={s.msgTextAgent} />
+                      <LinearGradient
+                        colors={GRAD_USER}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={s.msgUser}
+                      >
+                        {replyMsg && (
+                          <View style={s.replyQuote}>
+                            <Text style={s.replyQuoteLabel}>{replyMsg.role === 'user' ? 'You' : 'slatt'}</Text>
+                            <Text style={s.replyQuoteText} numberOfLines={2}>{replyMsg.content}</Text>
+                          </View>
+                        )}
+                        <Text style={s.msgTextUser}>{msg.content}</Text>
+                      </LinearGradient>
                     </TouchableOpacity>
-                  )}
-                </Animated.View>
-              )
-            )}
+                  </Animated.View>
+                </SwipeableMessage>
+              ) : (
+                <SwipeableMessage key={msg.id} onReply={msg.isError ? () => {} : () => setReplyTo(msg)}>
+                  <Animated.View
+                    entering={FadeInDown.duration(220)}
+                    style={[s.msgAgent, msg.isError && s.msgAgentError]}
+                  >
+                    <Text style={s.agentLabel}>{msg.isError ? '⚠  error' : 'slatt'}</Text>
+                    {replyMsg && (
+                      <View style={[s.replyQuote, s.replyQuoteAgent]}>
+                        <Text style={s.replyQuoteLabel}>{replyMsg.role === 'user' ? 'You' : 'slatt'}</Text>
+                        <Text style={s.replyQuoteText} numberOfLines={2}>{replyMsg.content}</Text>
+                      </View>
+                    )}
+                    {msg.isError ? (
+                      <>
+                        <Text style={[s.msgTextAgent, s.msgTextError]}>{msg.content}</Text>
+                        <TouchableOpacity onPress={retryLast} style={s.retryBtn} activeOpacity={0.7}>
+                          <Feather name="refresh-cw" size={11} color="#FF6B6B" />
+                          <Text style={s.retryText}>Retry</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        onLongPress={() => Share.share({ message: msg.content })}
+                        delayLongPress={400}
+                      >
+                        <MarkdownText text={msg.content} style={s.msgTextAgent} />
+                      </TouchableOpacity>
+                    )}
+                  </Animated.View>
+                </SwipeableMessage>
+              );
+            })}
           </ScrollView>
         )}
 
@@ -589,10 +750,22 @@ export default function ChatScreen() {
           </Animated.View>
         )}
 
+        {/* ── Reply banner ── */}
+        {replyTo && (
+          <View style={s.replyBanner}>
+            <View style={s.replyBannerAccent} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.replyBannerTo}>{replyTo.role === 'user' ? 'You' : 'slatt'}</Text>
+              <Text style={s.replyBannerMsg} numberOfLines={1}>{replyTo.content}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Feather name="x" size={15} color={T.muted} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* ── Input area ── */}
         <View style={[s.inputWrap, { paddingBottom: 20 }]}>
-
-          {/* Mode selector */}
           <View style={s.modeRow}>
             <TouchableOpacity
               style={[s.modeSeg, mode === 'teach' && s.modeSegTeach]}
@@ -612,7 +785,6 @@ export default function ChatScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* SMS-style input row */}
           <View style={s.inputRow}>
             <TextInput
               style={s.input}
@@ -628,17 +800,17 @@ export default function ChatScreen() {
               onPress={send}
               disabled={!input.trim() || sending}
               activeOpacity={0.8}
-              style={s.sendOuter}
+              style={[s.sendOuter, (!input.trim() || sending) && { opacity: 0.35 }]}
             >
               <LinearGradient
-                colors={input.trim() && !sending ? GRAD_SEND : GRAD_SEND_OFF}
+                colors={GRAD_SEND}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={s.sendBtn}
               >
                 {sending
-                  ? <ActivityIndicator size="small" color="rgba(255,255,255,0.4)" />
-                  : <Text style={[s.sendIcon, !input.trim() && s.sendIconOff]}>↑</Text>}
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={s.sendIcon}>↑</Text>}
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -665,7 +837,6 @@ const s = StyleSheet.create({
   headerTitle: { color: T.text, fontSize: 18, fontWeight: '900', letterSpacing: -0.4 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 14 },
 
-  // Empty
   empty: { flex: 1, paddingHorizontal: 28, justifyContent: 'center' },
   emptyWordmark: { color: T.text, fontSize: 42, fontWeight: '900', letterSpacing: -2, marginBottom: 4 },
   emptyTagline: { color: T.faint, fontSize: 10, fontWeight: '600', letterSpacing: 3.5, marginBottom: 20 },
@@ -680,7 +851,6 @@ const s = StyleSheet.create({
   hintMode: { fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 5 },
   hintEx: { color: T.muted, fontSize: 13, lineHeight: 20 },
 
-  // Messages
   list: { padding: 16, paddingBottom: 12, gap: 10 },
   msgUserWrap: { alignSelf: 'flex-end', maxWidth: '80%' },
   msgUser: { borderRadius: 20, borderBottomRightRadius: 5, paddingVertical: 11, paddingHorizontal: 16 },
@@ -708,7 +878,29 @@ const s = StyleSheet.create({
   },
   retryText: { color: '#FF6B6B', fontSize: 12, fontWeight: '600' },
 
-  // Input
+  replyQuote: {
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 8, borderLeftWidth: 2, borderLeftColor: 'rgba(255,255,255,0.3)',
+    paddingHorizontal: 10, paddingVertical: 6, marginBottom: 6,
+  },
+  replyQuoteAgent: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderLeftColor: 'rgba(255,255,255,0.15)',
+    marginBottom: 8,
+  },
+  replyQuoteLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: '700', marginBottom: 2 },
+  replyQuoteText: { color: 'rgba(255,255,255,0.65)', fontSize: 12, lineHeight: 17 },
+
+  replyBanner: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 10, gap: 10,
+    backgroundColor: '#080808',
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  replyBannerAccent: { width: 2, height: 32, borderRadius: 2, backgroundColor: T.ask },
+  replyBannerTo: { color: T.ask, fontSize: 11, fontWeight: '700', marginBottom: 2 },
+  replyBannerMsg: { color: T.muted, fontSize: 12, lineHeight: 16 },
+
   inputWrap: {
     paddingHorizontal: 14, paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth, borderColor: T.border,
@@ -735,5 +927,4 @@ const s = StyleSheet.create({
   sendOuter: { borderRadius: 22, overflow: 'hidden' },
   sendBtn: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
   sendIcon: { color: '#fff', fontSize: 20, fontWeight: '700', lineHeight: 22 },
-  sendIconOff: { opacity: 0.3 },
 });
