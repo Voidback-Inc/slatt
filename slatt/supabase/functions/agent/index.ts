@@ -3,10 +3,13 @@ import { Agent } from 'https://esm.sh/antonlytics@2.0.0';
 
 const FREE_DAILY_LIMIT = 30;
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(language?: string): string {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  return `Today's date is ${dateStr}.\n\n` + SYSTEM_PROMPT_BASE;
+  const langLine = language && language !== 'English'
+    ? `\n\nIMPORTANT: The user's app language is set to ${language}. Respond ONLY in ${language} regardless of what language the user writes in. Keep your tone and style, just use ${language}.`
+    : '';
+  return `Today's date is ${dateStr}.${langLine}\n\n` + SYSTEM_PROMPT_BASE;
 }
 
 function stampDate(text: string): string {
@@ -399,7 +402,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { action, message, history = [], imageBase64, imageMimeType } = await req.json();
+    const { action, message, history = [], imageBase64, imageMimeType, language } = await req.json();
     if (!action || !message) {
       return new Response(JSON.stringify({ error: 'Missing action or message' }), { status: 400, headers: cors });
     }
@@ -455,7 +458,7 @@ Deno.serve(async (req) => {
           );
           try {
             const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-            await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+            await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
             const result = await withTimeout(agent.ingest(ingestText), 25000);
             const created = result?.created ?? 0;
             body = {
@@ -476,7 +479,7 @@ Deno.serve(async (req) => {
         isSkipped = true;
         try {
           const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-          await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+          await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
           const result = await withTimeout(agent.chat(message, history), 25000);
           body = { message: result.response };
         } catch {
@@ -489,7 +492,7 @@ Deno.serve(async (req) => {
         // Question sent in teach mode — answer it
         try {
           const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-          await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+          await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
           const result = await withTimeout(agent.chat(message, history), 25000);
           body = { message: result.response, created: 1 };
         } catch (agentErr) {
@@ -509,7 +512,7 @@ Deno.serve(async (req) => {
           isSkipped = true;
           try {
             const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-            await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+            await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
             const result = await withTimeout(agent.chat(message, history), 25000);
             body = { message: result.response };
           } catch {
@@ -529,7 +532,7 @@ Deno.serve(async (req) => {
             const combinedText = `${originalClaim}\n\nContributor evidence: ${message}${trustedDomain ? ` [Source: ${trustedDomain}]` : ''}`;
             try {
               const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
               const result = await withTimeout(agent.ingest(stampDate(combinedText)), 25000);
               const created = result?.created ?? 0;
 
@@ -578,7 +581,7 @@ Deno.serve(async (req) => {
               const anecdotalText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${message}`;
               try {
                 const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-                await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+                await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
                 const result = await withTimeout(agent.ingest(stampDate(anecdotalText)), 25000);
                 const created = result?.created ?? 0;
 
@@ -604,7 +607,7 @@ Deno.serve(async (req) => {
 
             try {
               const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
               const result = await withTimeout(agent.ingest(stampDate(ingestText)), 25000);
               const created = result?.created ?? 0;
 
@@ -634,7 +637,7 @@ Deno.serve(async (req) => {
     } else if (action === 'ask') {
       try {
         const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-        await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+        await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
         const [chatResult, imageResult] = await Promise.all([
           withTimeout(agent.chat(message, history), 25000),
           supabase

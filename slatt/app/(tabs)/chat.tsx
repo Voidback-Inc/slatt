@@ -23,6 +23,8 @@ import { FREE_DAILY_LIMIT, STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANN
 import { setupIAP, purchasePlan, type PlanKey } from '@/lib/iap';
 import { useProfile } from '@/lib/useProfile';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
+import { t, getLangName } from '@/lib/i18n';
+import { useLanguage } from '@/lib/useLanguage';
 
 const SCREEN_W = Dimensions.get('window').width;
 
@@ -174,15 +176,15 @@ const ImageGallery = memo(function ImageGallery({
   const handleSave = useCallback(async (url: string) => {
     const { granted } = await MediaLibrary.requestPermissionsAsync();
     if (!granted) {
-      Alert.alert('Permission needed', 'Allow photo library access in Settings to save images.');
+      Alert.alert(t('permissionNeeded'), t('permissionPhotoMsg'));
       return;
     }
     try {
       const asset = await MediaLibrary.createAssetAsync(url);
       await MediaLibrary.createAlbumAsync('slatt', asset, false);
-      Alert.alert('Saved', 'Image saved to your library.');
+      Alert.alert(t('saved'), t('savedMsg'));
     } catch {
-      Alert.alert('Error', 'Could not save the image.');
+      Alert.alert('Error', t('couldNotSave'));
     }
   }, []);
 
@@ -218,7 +220,7 @@ const ImageGallery = memo(function ImageGallery({
             />
             <View style={ig.caption}>
               <Text style={ig.captionText} numberOfLines={2}>{img.description}</Text>
-              <Text style={ig.hint}>Hold to save</Text>
+              <Text style={ig.hint}>{t('holdToSave')}</Text>
             </View>
           </TouchableOpacity>
         ))}
@@ -537,6 +539,7 @@ export default function ChatScreen() {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const { profile, reloadProfile } = useProfile();
+  const { lang } = useLanguage();
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<PlanKey | null>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -633,7 +636,7 @@ export default function ChatScreen() {
     const placeholderMsg: Message | null = capturedImage && mode === 'teach' ? {
       id: `p-${Date.now()}`,
       role: 'agent',
-      content: 'Filing your image to the collective...',
+      content: t('filingImage'),
       mode,
       isPending: true,
     } : null;
@@ -665,6 +668,7 @@ export default function ChatScreen() {
             action: mode,
             message: messageForAgent,
             history,
+            language: getLangName(),
             ...(capturedImage ? {
               imageBase64: capturedImage.base64,
               imageMimeType: capturedImage.mimeType,
@@ -725,7 +729,7 @@ export default function ChatScreen() {
   const pickImage = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow photo library access in Settings to share images.');
+      Alert.alert(t('permissionNeeded'), t('permissionMsg'));
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -772,6 +776,9 @@ export default function ChatScreen() {
         <View style={s.header}>
           <Text style={s.headerTitle}>slatt</Text>
           <View style={s.headerRight}>
+            {profile === null && (
+              <View style={s.headerSkeleton} />
+            )}
             {profile?.tier === 'pro' && <ProBadge />}
             {profile?.tier === 'free' && queriesLeft !== null && (
               <QueryRing left={queriesLeft} total={FREE_DAILY_LIMIT} onPress={() => setShowPaywall(true)} />
@@ -789,24 +796,21 @@ export default function ChatScreen() {
           <Pressable style={{ flex: 1 }} onPress={Keyboard.dismiss}>
             <Animated.View entering={FadeIn.duration(400)} style={s.empty}>
               <Text style={s.emptyWordmark}>slatt</Text>
-              <Text style={s.emptyTagline}>COLLECTIVE INTELLIGENCE</Text>
-              <Text style={s.emptySub}>
-                Share what you know or ask what you want to know.{'\n'}
-                Every Pro member's insight lives here.
-              </Text>
+              <Text style={s.emptyTagline}>{t('collectiveIntelligence')}</Text>
+              <Text style={s.emptySub}>{t('emptySub')}</Text>
               <View style={s.hints}>
                 <View style={s.hintCard}>
                   <View style={[s.hintDot, { backgroundColor: T.teach }]} />
                   <View style={{ flex: 1 }}>
-                    <Text style={[s.hintMode, { color: T.teach }]}>TEACH</Text>
-                    <Text style={s.hintEx}>"Closed a $2M deal by sending proposals as Notion pages."</Text>
+                    <Text style={[s.hintMode, { color: T.teach }]}>{t('teachLabel')}</Text>
+                    <Text style={s.hintEx}>{t('teachExample')}</Text>
                   </View>
                 </View>
                 <View style={s.hintCard}>
                   <View style={[s.hintDot, { backgroundColor: T.ask }]} />
                   <View style={{ flex: 1 }}>
-                    <Text style={[s.hintMode, { color: T.ask }]}>ASK</Text>
-                    <Text style={s.hintEx}>"What's the best way to present a big proposal?"</Text>
+                    <Text style={[s.hintMode, { color: T.ask }]}>{t('askLabel')}</Text>
+                    <Text style={s.hintEx}>{t('askExample')}</Text>
                   </View>
                 </View>
               </View>
@@ -942,7 +946,7 @@ export default function ChatScreen() {
               style={s.input}
               value={input}
               onChangeText={setInput}
-              placeholder={pendingImage ? 'Add a caption...' : mode === 'teach' ? 'Share something...' : 'Ask anything...'}
+              placeholder={pendingImage ? t('captionPlaceholder') : mode === 'teach' ? t('sharePlaceholder') : t('askPlaceholder')}
               placeholderTextColor={T.faint}
               multiline
               maxLength={2000}
@@ -988,6 +992,7 @@ const s = StyleSheet.create({
   },
   headerTitle: { color: T.text, fontSize: 18, fontWeight: '900', letterSpacing: -0.4 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  headerSkeleton: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.08)' },
 
   empty: { flex: 1, paddingHorizontal: 28, justifyContent: 'center' },
   emptyWordmark: { color: T.text, fontSize: 42, fontWeight: '900', letterSpacing: -2, marginBottom: 4 },

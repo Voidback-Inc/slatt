@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView,
-  StyleSheet, Alert, Modal, Share,
+  StyleSheet, Alert, Modal, Share, Animated,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -10,6 +10,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { loadConversations, deleteConversation, clearHistory, setPendingResume, type Conversation } from '@/lib/history';
 import { supabase } from '@/lib/supabase';
 import { FREE_DAILY_LIMIT } from '@/lib/constants';
+import { t } from '@/lib/i18n';
+import { useLanguage } from '@/lib/useLanguage';
 import type { Profile } from '@/lib/supabase';
 
 const T = {
@@ -32,8 +34,8 @@ function dayLabel(ts: number): string {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const yestStart = todayStart - 86400000;
   const convStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  if (convStart >= todayStart) return 'Today';
-  if (convStart >= yestStart) return 'Yesterday';
+  if (convStart >= todayStart) return t('today');
+  if (convStart >= yestStart) return t('yesterday');
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
@@ -50,6 +52,49 @@ function groupConversations(convs: Conversation[]): { label: string; items: Conv
   }
   return Array.from(map.entries()).map(([label, items]) => ({ label, items }));
 }
+
+// ── Skeleton card ─────────────────────────────────────────────────────────────
+
+function SkeletonCard() {
+  const anim = useRef(new Animated.Value(0.35)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 0.75, duration: 750, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0.35, duration: 750, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  return (
+    <Animated.View style={[sk.card, { opacity: anim }]}>
+      <View style={sk.accent} />
+      <View style={sk.body}>
+        <View style={sk.line1} />
+        <View style={sk.line2} />
+        <View style={sk.line3} />
+      </View>
+    </Animated.View>
+  );
+}
+
+const sk = StyleSheet.create({
+  card: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 16, marginBottom: 2,
+    backgroundColor: '#0B0B0B', borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.06)',
+    overflow: 'hidden', height: 72,
+  },
+  accent: { width: 3, alignSelf: 'stretch', borderTopLeftRadius: 16, borderBottomLeftRadius: 16, backgroundColor: 'rgba(255,255,255,0.08)' },
+  body: { flex: 1, paddingVertical: 14, paddingHorizontal: 14, gap: 6 },
+  line1: { height: 12, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, width: '65%' },
+  line2: { height: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 5, width: '85%' },
+  line3: { height: 9, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 4, width: '40%' },
+});
 
 // ── Conversation detail modal ─────────────────────────────────────────────────
 
@@ -71,26 +116,20 @@ function ConversationModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={[md.root, { paddingTop: insets.top }]}>
-        {/* Header — sits below status bar */}
         <View style={md.header}>
           <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Feather name="chevron-down" size={22} color={T.muted} />
           </TouchableOpacity>
           <Text style={md.title} numberOfLines={1}>{conv.title}</Text>
           <TouchableOpacity
-            onPress={() => Share.share({ message: conv.messages.map(m => `${m.role === 'user' ? 'You' : 'slatt'}: ${m.content}`).join('\n\n') })}
+            onPress={() => Share.share({ message: conv.messages.map(m => `${m.role === 'user' ? t('youPrefix') : 'slatt'}: ${m.content}`).join('\n\n') })}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Feather name="share" size={18} color={T.muted} />
           </TouchableOpacity>
         </View>
 
-        {/* Messages */}
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={md.list}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={md.list} showsVerticalScrollIndicator={false}>
           {conv.messages.map(msg =>
             msg.role === 'user' ? (
               <TouchableOpacity
@@ -100,11 +139,7 @@ function ConversationModal({
                 delayLongPress={400}
                 style={md.userWrap}
               >
-                <LinearGradient
-                  colors={GRAD_USER}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                  style={md.userBubble}
-                >
+                <LinearGradient colors={GRAD_USER} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={md.userBubble}>
                   <Text style={md.userText}>{msg.content}</Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -123,21 +158,16 @@ function ConversationModal({
           )}
         </ScrollView>
 
-        {/* Continue button — floats above home indicator */}
         <View style={[md.footer, { paddingBottom: insets.bottom + 12 }]}>
           {isAtLimit ? (
             <View style={md.limitWrap}>
-              <Text style={md.limitText}>Daily limit reached — upgrade to continue.</Text>
+              <Text style={md.limitText}>{t('dailyLimitMsg')}</Text>
             </View>
           ) : (
             <TouchableOpacity onPress={onContinue} activeOpacity={0.85} style={md.continueOuter}>
-              <LinearGradient
-                colors={['#1D9BF0', '#8B5CF6']}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                style={md.continueBtn}
-              >
+              <LinearGradient colors={['#1D9BF0', '#8B5CF6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={md.continueBtn}>
                 <Feather name="message-circle" size={15} color="#fff" />
-                <Text style={md.continueText}>Continue conversation</Text>
+                <Text style={md.continueText}>{t('continueConversation')}</Text>
               </LinearGradient>
             </TouchableOpacity>
           )}
@@ -172,10 +202,7 @@ const md = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.07)',
   },
   continueOuter: { borderRadius: 16, overflow: 'hidden' },
-  continueBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, height: 52,
-  },
+  continueBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52 },
   continueText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   limitWrap: {
     backgroundColor: 'rgba(245,200,66,0.08)', borderRadius: 12, padding: 14,
@@ -189,9 +216,11 @@ const md = StyleSheet.create({
 
 export default function HistoryScreen() {
   const router = useRouter();
+  const { lang } = useLanguage();
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [selected, setSelected] = useState<Conversation | null>(null);
+  const [loading, setLoading] = useState(true);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -199,6 +228,7 @@ export default function HistoryScreen() {
   }, []);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const [data, { data: { user } }] = await Promise.all([
         loadConversations(),
@@ -215,17 +245,19 @@ export default function HistoryScreen() {
         if (p && mounted.current) setProfile(p as Profile);
       }
     } catch {
-      // Auth session gone (sign-out in progress)
+      // Auth session gone
+    } finally {
+      if (mounted.current) setLoading(false);
     }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const handleDelete = (id: string) => {
-    Alert.alert('Delete conversation', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('deleteConvTitle'), t('deleteConvMsg'), [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive',
+        text: t('delete'), style: 'destructive',
         onPress: async () => {
           await deleteConversation(id);
           setConvs(prev => prev.filter(c => c.id !== id));
@@ -237,10 +269,10 @@ export default function HistoryScreen() {
 
   const handleClearAll = () => {
     if (convs.length === 0) return;
-    Alert.alert('Clear all history', 'Delete all conversations? This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('clearAllTitle'), t('clearAllMsg'), [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Clear all', style: 'destructive',
+        text: t('clearAll'), style: 'destructive',
         onPress: async () => {
           await clearHistory();
           setConvs([]);
@@ -260,21 +292,32 @@ export default function HistoryScreen() {
   return (
     <SafeAreaView style={s.root} edges={['top']}>
       <View style={s.header}>
-        <Text style={s.title}>History</Text>
+        <Text style={s.title}>{t('historyTitle')}</Text>
         {convs.length > 0 && (
           <TouchableOpacity onPress={handleClearAll} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={s.clearBtn}>Clear all</Text>
+            <Text style={s.clearBtn}>{t('clearAll')}</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {convs.length === 0 ? (
+      {loading ? (
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 12, paddingBottom: 32 }}>
+          <View style={s.skeletonSection}>
+            <View style={s.skeletonLabel} />
+          </View>
+          {[1, 2, 3].map(i => <SkeletonCard key={i} />)}
+          <View style={[s.skeletonSection, { marginTop: 20 }]}>
+            <View style={s.skeletonLabel} />
+          </View>
+          {[4, 5].map(i => <SkeletonCard key={i} />)}
+        </ScrollView>
+      ) : convs.length === 0 ? (
         <View style={s.empty}>
           <View style={s.emptyIcon}>
             <Feather name="clock" size={28} color={T.faint} />
           </View>
-          <Text style={s.emptyTitle}>No history yet</Text>
-          <Text style={s.emptySub}>Your conversations will appear here after your first chat.</Text>
+          <Text style={s.emptyTitle}>{t('noHistoryYet')}</Text>
+          <Text style={s.emptySub}>{t('noHistorySub')}</Text>
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
@@ -296,11 +339,11 @@ export default function HistoryScreen() {
                       <Text style={s.itemTitle} numberOfLines={1}>{conv.title}</Text>
                       {lastMsg && (
                         <Text style={s.itemPreview} numberOfLines={1}>
-                          {lastMsg.role === 'agent' ? 'slatt: ' : 'You: '}{lastMsg.content}
+                          {lastMsg.role === 'agent' ? 'slatt: ' : `${t('youPrefix')}: `}{lastMsg.content}
                         </Text>
                       )}
                       <Text style={s.itemMeta}>
-                        {timeLabel(conv.createdAt)} · {conv.messages.length} {conv.messages.length === 1 ? 'message' : 'messages'}
+                        {timeLabel(conv.createdAt)} · {conv.messages.length} {conv.messages.length === 1 ? t('msgSingular') : t('msgPlural')}
                       </Text>
                     </View>
                     <TouchableOpacity
@@ -339,6 +382,9 @@ const s = StyleSheet.create({
   },
   title: { color: '#FFF', fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
   clearBtn: { color: 'rgba(255,69,58,0.7)', fontSize: 13, fontWeight: '600' },
+
+  skeletonSection: { paddingHorizontal: 20, paddingBottom: 10 },
+  skeletonLabel: { height: 10, width: 80, backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 5 },
 
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
   emptyIcon: {

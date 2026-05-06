@@ -12,6 +12,8 @@ import { STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@
 import { purchasePlan, restorePurchases, type PlanKey } from '@/lib/iap';
 import { useProfile } from '@/lib/useProfile';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
+import { t, LANGUAGES } from '@/lib/i18n';
+import { useLanguage } from '@/lib/useLanguage';
 import Logo from '@/assets/images/icon.png';
 
 const T = {
@@ -84,6 +86,8 @@ function Badge({ label, color }: { label: string; color?: string }) {
 
 export default function SettingsScreen() {
   const { profile, email, reloadProfile } = useProfile();
+  const { lang, changeLang } = useLanguage();
+  const [showLangModal, setShowLangModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<PlanKey | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -313,31 +317,39 @@ export default function SettingsScreen() {
 
         {/* Account */}
         <View style={s.group}>
-          <Text style={s.groupLabel}>Account</Text>
+          <Text style={s.groupLabel}>{t('account')}</Text>
           <View style={s.infoRow}>
-            <Text style={s.infoLabel}>Email</Text>
+            <Text style={s.infoLabel}>{t('emailLabel')}</Text>
             <Text style={s.infoValue} numberOfLines={1}>{email || '—'}</Text>
           </View>
           <View style={s.divider} />
           <View style={s.infoRow}>
-            <Text style={s.infoLabel}>Plan</Text>
+            <Text style={s.infoLabel}>{t('planLabel')}</Text>
             <Text style={[s.infoValue, { color: isPro ? T.pro : T.accentDim }]}>
-              {isPro ? 'Pro' : 'Free'}
+              {isPro ? t('proPlan') : t('freePlan')}
             </Text>
           </View>
           <View style={s.divider} />
           <TouchableOpacity style={s.infoRow} onPress={handleChangePassword} disabled={changePwLoading}>
-            <Text style={s.infoLabel}>Password</Text>
+            <Text style={s.infoLabel}>{t('passwordLabel')}</Text>
             {changePwLoading
               ? <ActivityIndicator size="small" color={T.accentDim} />
-              : <Text style={[s.infoValue, { color: T.ask }]}>Change</Text>}
+              : <Text style={[s.infoValue, { color: T.ask }]}>{t('change')}</Text>}
+          </TouchableOpacity>
+          <View style={s.divider} />
+          <TouchableOpacity style={s.infoRow} onPress={() => setShowLangModal(true)}>
+            <Text style={s.infoLabel}>{t('language')}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={s.infoValue}>{LANGUAGES.find(l => l.code === lang)?.nativeName}</Text>
+              <ChevronDown size={13} color={T.accentSub} strokeWidth={2} />
+            </View>
           </TouchableOpacity>
 
           {!isPro && (
             <>
               <View style={s.divider} />
               <View style={s.upgradeWrap}>
-                <Text style={s.upgradeLabel}>Unlock unlimited access</Text>
+                <Text style={s.upgradeLabel}>{t('unlockUnlimited')}</Text>
                 <TouchableOpacity
                   style={s.upgradeBtn}
                   onPress={() => handleUpgrade('monthly')}
@@ -367,7 +379,7 @@ export default function SettingsScreen() {
               <TouchableOpacity onPress={handleRestore} disabled={restoring} style={{ marginTop: 12, alignItems: 'center' }}>
                 {restoring
                   ? <ActivityIndicator size="small" color={T.muted} />
-                  : <Text style={{ color: T.muted, fontSize: 13, fontWeight: '500' }}>Restore purchases</Text>}
+                  : <Text style={{ color: T.muted, fontSize: 13, fontWeight: '500' }}>{t('restorePurchases')}</Text>}
               </TouchableOpacity>
             </>
           )}
@@ -375,10 +387,10 @@ export default function SettingsScreen() {
 
         {/* Legal */}
         <View style={s.group}>
-          <Text style={s.groupLabel}>Legal</Text>
-          <Section icon={Shield} title="Privacy Policy" content={PRIVACY_POLICY} />
+          <Text style={s.groupLabel}>{t('legal')}</Text>
+          <Section icon={Shield} title={t('privacyPolicy')} content={PRIVACY_POLICY} />
           <View style={s.divider} />
-          <Section icon={FileText} title="Terms of Service" content={TERMS_OF_SERVICE} />
+          <Section icon={FileText} title={t('termsOfService')} content={TERMS_OF_SERVICE} />
         </View>
 
         {/* About */}
@@ -426,13 +438,13 @@ export default function SettingsScreen() {
               : (
                 <>
                   <LogOut size={16} color={T.danger} strokeWidth={2} />
-                  <Text style={s.signOutText}>Sign out</Text>
+                  <Text style={s.signOutText}>{t('signOut')}</Text>
                 </>
               )}
           </TouchableOpacity>
           <TouchableOpacity style={s.deleteRow} onPress={handleDeleteAccount}>
             <Trash2 size={15} color="rgba(255,59,48,0.5)" strokeWidth={2} />
-            <Text style={s.deleteText}>Delete account</Text>
+            <Text style={s.deleteText}>{t('deleteAccount')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -546,6 +558,41 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Language picker modal */}
+      <Modal
+        visible={showLangModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowLangModal(false)}
+      >
+        <View style={lm.overlay}>
+          <View style={lm.card}>
+            <View style={lm.pill} />
+            <Text style={lm.title}>{t('selectLanguage')}</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+              {LANGUAGES.map(l => (
+                <TouchableOpacity
+                  key={l.code}
+                  style={lm.row}
+                  onPress={() => { changeLang(l.code); setShowLangModal(false); }}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={lm.native}>{l.nativeName}</Text>
+                    <Text style={lm.nameEn}>{l.name}</Text>
+                  </View>
+                  {lang === l.code && <ChevronDown size={0} color="transparent" />}
+                  {lang === l.code && <View style={lm.check} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={lm.cancel} onPress={() => setShowLangModal(false)}>
+              <Text style={lm.cancelText}>{t('cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Delete account OTP modal */}
@@ -714,6 +761,30 @@ const s = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,59,48,0.15)',
   },
   deleteText: { color: 'rgba(255,59,48,0.6)', fontSize: 14, fontWeight: '600' },
+});
+
+// ── Language picker modal styles ──────────────────────────────────────────────
+
+const lm = StyleSheet.create({
+  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.65)' },
+  card: {
+    backgroundColor: '#0D0D0D', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 20, paddingTop: 14,
+    borderWidth: StyleSheet.hairlineWidth, borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  pill: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'center', marginBottom: 20 },
+  title: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 16 },
+  row: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  native: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  nameEn: { color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: 1 },
+  check: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#1D9BF0' },
+  cancel: { alignItems: 'center', paddingVertical: 16, marginTop: 4 },
+  cancelText: { color: 'rgba(255,255,255,0.45)', fontSize: 14 },
 });
 
 // ── Delete account OTP modal styles ──────────────────────────────────────────

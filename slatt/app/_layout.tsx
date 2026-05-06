@@ -6,6 +6,7 @@ import { View, Text, Animated, StyleSheet } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
+import { loadLang } from '@/lib/i18n';
 import type { Session } from '@supabase/supabase-js';
 
 SplashScreen.preventAutoHideAsync();
@@ -58,6 +59,8 @@ export default function RootLayout() {
       }),
     ]).start();
   }, []);
+
+  useEffect(() => { loadLang(); }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
