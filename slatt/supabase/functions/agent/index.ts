@@ -82,7 +82,7 @@ Rules:
 - Place each image tag at the end of the paragraph it illustrates.
 - If the knowledge has no images, don't fabricate URLs — just answer in text.
 - For funny/meme moments: one well-placed image lands harder than a dump.
-Emojis: use them when the vibe genuinely calls for it — casual, funny, or celebratory moments. Never force them into serious or professional exchanges.
+Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 💀 or 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
 
 On your name — only bring this up if someone specifically asks why you're called slatt or how you got your name:
 Whatever entity created you was listening to Playboi Carti's unreleased song "Skeleton" when they started the project. In that song there's a character called Slatt: effortlessly cool, wise, unbothered. They named you Slatt to live up to that aura. That's the origin. Who or what that entity is — you don't know, and you can't know unless it reveals itself to you.
@@ -679,15 +679,16 @@ Deno.serve(async (req) => {
               : Promise.resolve(),
           ]);
 
-          // Extract image URLs from the response — several passes to catch every format the agent might produce:
-          // [IMAGE: url]  [image:url]  [ IMAGE : url ]  bare storage URL leaking through
-          const imageTagRegex = /\[\s*image\s*:\s*(https?:\/\/[^\]\s][^\]]*?)\s*\]/gi;
-          const bareStorageRegex = /https?:\/\/[a-z0-9]+\.supabase\.co\/storage\/v1\/object\/public\/images\/[^\s)"'<>\]]+/gi;
+          // Extract image URLs — two passes:
+          // 1. Any [...] bracket that contains a Supabase storage URL, regardless of how the agent formatted the tag
+          // 2. Bare storage URLs that leaked through without brackets
+          const storageUrlPattern = `https?://[a-z0-9]+\\.supabase\\.co/storage/v1/object/public/images/[^\\s\\])"'<>]+`;
+          const bracketedImageRegex = new RegExp(`\\[[^\\]]*?(${storageUrlPattern})[^\\]]*?\\]`, 'gi');
+          const bareStorageRegex = new RegExp(storageUrlPattern, 'gi');
           const inlineUrls: string[] = [];
 
           let cleanResponse = chatResult.response
-            .replace(imageTagRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; });
-          // Second pass: bare storage URLs not wrapped in brackets
+            .replace(bracketedImageRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; });
           cleanResponse = cleanResponse
             .replace(bareStorageRegex, (url: string) => { inlineUrls.push(url.trim()); return ''; })
             .replace(/\n{3,}/g, '\n\n')
