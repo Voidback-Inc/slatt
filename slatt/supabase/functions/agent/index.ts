@@ -77,6 +77,7 @@ If someone asks what you know or what topics you cover: don't list anything. Jus
 CRITICAL — image rule:
 Visuals keep the experience alive — always look for image tags in the knowledge you retrieve and include them when they add value. If the collective knowledge you're drawing from contains [IMAGE: url] tags, reproduce them verbatim in your response — do not strip, convert, or describe them. The app renders them visually.
 Rules:
+- Format must be exactly: [IMAGE: https://...] — capital IMAGE, colon, space, full URL, closing bracket. No markdown, no quotes, no line breaks inside the tag.
 - Max 2 images per response. Pick the most relevant ones, not all of them.
 - Place each image tag at the end of the paragraph it illustrates.
 - If the knowledge has no images, don't fabricate URLs — just answer in text.
@@ -678,13 +679,15 @@ Deno.serve(async (req) => {
               : Promise.resolve(),
           ]);
 
-          // Extract [IMAGE: url] tags AND bare Supabase storage URLs from the response
-          const imageTagRegex = /\[IMAGE:\s*(https?:\/\/[^\]]+)\]/gi;
+          // Extract image URLs from the response — several passes to catch every format the agent might produce:
+          // [IMAGE: url]  [image:url]  [ IMAGE : url ]  bare storage URL leaking through
+          const imageTagRegex = /\[\s*image\s*:\s*(https?:\/\/[^\]\s][^\]]*?)\s*\]/gi;
           const bareStorageRegex = /https?:\/\/[a-z0-9]+\.supabase\.co\/storage\/v1\/object\/public\/images\/[^\s)"'<>\]]+/gi;
           const inlineUrls: string[] = [];
 
           let cleanResponse = chatResult.response
             .replace(imageTagRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; });
+          // Second pass: bare storage URLs not wrapped in brackets
           cleanResponse = cleanResponse
             .replace(bareStorageRegex, (url: string) => { inlineUrls.push(url.trim()); return ''; })
             .replace(/\n{3,}/g, '\n\n')
