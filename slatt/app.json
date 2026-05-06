@@ -4,7 +4,7 @@
     "description": "slatt is collective intelligence that grows smarter as people teach it. Ask questions, get verified answers, and contribute what you know — fact-checked or from real personal experience.",
     "sdkVersion": "54.0.0",
     "slug": "slatt",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "slatt",
@@ -14,7 +14,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.voidback.slatt",
       "buildNumber": "1",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
