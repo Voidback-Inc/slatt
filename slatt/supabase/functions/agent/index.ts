@@ -718,20 +718,22 @@ Deno.serve(async (req) => {
             }
 
             // Priority 2 (always runs if Priority 1 found nothing): description search.
-            // Guard: ensure every entity is a plain string before calling .replace().
+            // Only use relevant_entities — raw message words are too noisy and match unrelated images.
             if (!allImages.length) {
               const rawEntities = Array.isArray(chatResult?.relevant_entities) ? chatResult.relevant_entities : [];
               const entities: string[] = rawEntities
                 .filter((e: any) => e != null)
-                .map((e: any) => (typeof e === 'string' ? e : typeof e === 'object' ? (e.name ?? e.value ?? JSON.stringify(e)) : String(e)));
+                .map((e: any) => (typeof e === 'string' ? e : typeof e === 'object' ? String(e.name ?? e.value ?? '') : String(e)))
+                .filter((e: string) => e.length >= 4);
 
-              const msgWords = typeof message === 'string'
-                ? message.split(/\s+/).filter((w: string) => w.length > 3)
-                : [];
+              // Strip generic words that would match random images in the collective
+              const STOP = new Set(['show', 'tell', 'give', 'find', 'look', 'make', 'take', 'send', 'need', 'know', 'like', 'have', 'also', 'just', 'does', 'more', 'some', 'here', 'this', 'that', 'with', 'from', 'what', 'about', 'image', 'photo', 'picture', 'visual', 'collective', 'slatt']);
 
-              const searchTerms = (entities.length > 0 ? entities.slice(0, 4) : msgWords.slice(0, 4))
+              const searchTerms = entities
+                .filter((t: string) => !STOP.has(t.toLowerCase()))
                 .map((t: string) => t.replace(/[%_\\]/g, ''))
-                .filter(Boolean);
+                .filter(Boolean)
+                .slice(0, 3);
 
               if (searchTerms.length > 0) {
                 const filters = searchTerms.map((t: string) => `description.ilike.%${t}%`).join(',');
@@ -739,9 +741,14 @@ Deno.serve(async (req) => {
                   .from('collective_images')
                   .select('image_url, description')
                   .or(filters)
-                  .limit(2);
+                  .limit(3);
                 if (matched?.length) {
-                  allImages = matched.map((r: any) => ({ url: r.image_url as string, description: r.description as string }));
+                  // Deduplicate by URL then cap at 2
+                  const seen = new Set<string>();
+                  allImages = matched
+                    .filter((r: any) => { if (seen.has(r.image_url)) return false; seen.add(r.image_url); return true; })
+                    .slice(0, 2)
+                    .map((r: any) => ({ url: r.image_url as string, description: r.description as string }));
                 }
               }
             }
