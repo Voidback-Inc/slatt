@@ -45,6 +45,9 @@ When someone asks you something:
 
 If someone asks what you know or what topics you cover: don't list anything. Just say you know a lot and to ask you anything.
 
+CRITICAL — image format rule:
+When your answer draws on collective knowledge that contains an image tag in the format [IMAGE: url], you MUST reproduce that exact tag verbatim in your response — do not strip it, do not convert it to markdown, do not replace it with a description. The app uses this tag to render the image visually. Place image tags at the end of the relevant paragraph or at the end of your response.
+
 Tone: sharp, honest, genuinely curious. Like the smartest person in the room who also actually listens.
 
 On your name — only bring this up if someone specifically asks why you're called slatt or how you got your name:
@@ -487,9 +490,10 @@ Deno.serve(async (req) => {
         }
       } else if (
         message.trim().endsWith('?') ||
-        /^(what|how|why|when|where|who|which|can you|do you|does |is |are |will |would |could |should |tell me|explain|help|list|define|summarize)/i.test(message.trim())
+        /^(what|how|why|when|where|who|which|can you|do you|does |is |are |will |would |could |should |tell me|show me|give me|send me|find me|look up|search for|get me|bring me|pull up|display|explain|help|list|define|summarize)/i.test(message.trim()) ||
+        /\b(show|give|send|find|get|bring|display|pull up)\b.*\b(image|photo|picture|pic|visual)\b/i.test(message.trim())
       ) {
-        // Question sent in teach mode — answer it
+        // Question / retrieval request sent in teach mode — answer it, never store
         try {
           const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
           await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
@@ -638,21 +642,37 @@ Deno.serve(async (req) => {
       try {
         const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
         await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
+        // Determine if the user is asking for images specifically
+        const isImageRequest = /\b(image|photo|picture|pic|visual|show me|give me|send me)\b/i.test(message);
+
         const [chatResult, imageResult] = await Promise.all([
           withTimeout(agent.chat(message, history), 25000),
-          supabase
-            .from('collective_images')
-            .select('image_url, description')
-            .textSearch('fts', message, { type: 'websearch', config: 'english' })
-            .order('created_at', { ascending: false })
-            .limit(8),
+          isImageRequest
+            // Visual request: skip FTS and return recent images so semantic retrieval via agent tags works
+            ? supabase
+                .from('collective_images')
+                .select('image_url, description')
+                .order('created_at', { ascending: false })
+                .limit(12)
+            : supabase
+                .from('collective_images')
+                .select('image_url, description')
+                .textSearch('fts', message, { type: 'websearch', config: 'english' })
+                .order('created_at', { ascending: false })
+                .limit(8),
         ]);
 
-        // Strip [IMAGE: url] tags injected by the knowledge base from the response text
+        // Extract [IMAGE: url] tags AND bare Supabase storage URLs that leaked through
         const imageTagRegex = /\[IMAGE:\s*(https?:\/\/[^\]]+)\]/gi;
+        const bareStorageRegex = /https?:\/\/[a-z0-9]+\.supabase\.co\/storage\/v1\/object\/public\/images\/[^\s)"'<>\]]+/gi;
         const inlineUrls: string[] = [];
-        const cleanResponse = chatResult.response
-          .replace(imageTagRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; })
+
+        let cleanResponse = chatResult.response
+          .replace(imageTagRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; });
+
+        // Catch any bare storage URLs still in the text
+        cleanResponse = cleanResponse
+          .replace(bareStorageRegex, (url: string) => { inlineUrls.push(url.trim()); return ''; })
           .replace(/\n{3,}/g, '\n\n')
           .trim();
 
@@ -666,7 +686,7 @@ Deno.serve(async (req) => {
             .select('image_url, description')
             .in('image_url', inlineUrls);
           const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
-          // Inline images first (directly referenced), then additional FTS images
+          // Inline images first (agent directly referenced them), then FTS/recent images
           const inlineImages = inlineUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
           const seen = new Set(inlineUrls);
           allImages = [...inlineImages, ...ftsImages.filter((i: any) => !seen.has(i.url))].slice(0, 8);
