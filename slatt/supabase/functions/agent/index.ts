@@ -425,49 +425,48 @@ Deno.serve(async (req) => {
       // ── Image teach path ──────────────────────────────────────────────────────
       if (imageBase64 && ANTHROPIC_API_KEY) {
         const mime = (imageMimeType as string) || 'image/jpeg';
-        const analysis = await analyzeImage(ANTHROPIC_API_KEY, imageBase64 as string, mime, message);
+        const imageBytes = Uint8Array.from(atob(imageBase64 as string), c => c.charCodeAt(0));
+        const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : 'jpg';
+        const filePath = `${user.id}/${Date.now()}.${ext}`;
+
+        // Parallelize NSFW analysis and upload to halve wait time
+        const [analysis, uploadResult] = await Promise.all([
+          analyzeImage(ANTHROPIC_API_KEY, imageBase64 as string, mime, message),
+          supabase.storage.from('images').upload(filePath, imageBytes, { contentType: mime, upsert: false }),
+        ]);
 
         if (!analysis.safe) {
+          if (!uploadResult.error) {
+            supabase.storage.from('images').remove([filePath]).catch(() => {});
+          }
           isSkipped = true;
           body = { message: "That image can't go into the collective — it contains content that's not allowed (NSFW, graphic, or private individuals).", skipped: true };
+        } else if (uploadResult.error) {
+          isSkipped = true;
+          body = { message: "Couldn't upload the image right now. Try again.", skipped: true };
         } else {
-          // Upload to Supabase storage
-          const imageBytes = Uint8Array.from(atob(imageBase64 as string), c => c.charCodeAt(0));
-          const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : 'jpg';
-          const filePath = `${user.id}/${Date.now()}.${ext}`;
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('images')
-            .upload(filePath, imageBytes, { contentType: mime, upsert: false });
+          const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(uploadResult.data.path);
+          const description = analysis.description!;
 
-          if (uploadError) {
-            isSkipped = true;
-            body = { message: "Couldn't upload the image right now. Try again.", skipped: true };
-          } else {
-            const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(uploadData.path);
-            const description = analysis.description!;
+          await supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description });
 
-            // Store in collective_images table
-            await supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description });
-
-            // Ingest into Antonlytics with image URL embedded
-            const ingestText = stampDate(
-              `${description}${message ? `\n\nContributor context: ${message}` : ''}\n\n[IMAGE: ${publicUrl}]`
-            );
-            try {
-              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
-              const result = await withTimeout(agent.ingest(ingestText), 25000);
-              const created = result?.created ?? 0;
-              body = {
-                message: created > 0
-                  ? `Locked in.\n\n"${description.length > 110 ? description.slice(0, 107) + '...' : description}"\n\nImage filed in the collective.`
-                  : "Image saved but the description was too vague to index well. Add more context next time.",
-                created,
-                imageUrl: publicUrl,
-              };
-            } catch (agentErr) {
-              body = { message: `Image saved but couldn't index it: ${(agentErr as Error).message}`, imageUrl: publicUrl, created: 1 };
-            }
+          const ingestText = stampDate(
+            `${description}${message ? `\n\nContributor context: ${message}` : ''}\n\n[IMAGE: ${publicUrl}]`
+          );
+          try {
+            const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+            await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+            const result = await withTimeout(agent.ingest(ingestText), 25000);
+            const created = result?.created ?? 0;
+            body = {
+              message: created > 0
+                ? `Locked in.\n\n"${description.length > 110 ? description.slice(0, 107) + '...' : description}"\n\nImage filed in the collective.`
+                : "Image saved but the description was too vague to index well. Add more context next time.",
+              created,
+              imageUrl: publicUrl,
+            };
+          } catch (agentErr) {
+            body = { message: `Image saved but couldn't index it: ${(agentErr as Error).message}`, imageUrl: publicUrl, created: 1 };
           }
         }
       }
@@ -641,7 +640,7 @@ Deno.serve(async (req) => {
           supabase
             .from('collective_images')
             .select('image_url, description')
-            .textSearch('fts', message.split(/\s+/).filter(w => w.length > 3).slice(0, 6).join(' | '))
+            .textSearch('fts', message, { type: 'websearch', config: 'english' })
             .order('created_at', { ascending: false })
             .limit(8),
         ]);

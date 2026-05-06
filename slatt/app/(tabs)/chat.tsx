@@ -153,6 +153,7 @@ type Message = {
   content: string;
   mode: Mode;
   isError?: boolean;
+  isPending?: boolean;
   replyToId?: string;
   imageUri?: string;
   images?: { url: string; description: string }[];
@@ -167,13 +168,14 @@ const ImageGallery = memo(function ImageGallery({
 }: {
   images: { url: string; description: string }[];
 }) {
-  const [savePermission, requestSavePermission] = MediaLibrary.usePermissions();
+  const [activeIdx, setActiveIdx] = useState(0);
   const CARD_W = SCREEN_W * 0.72;
 
   const handleSave = useCallback(async (url: string) => {
-    if (!savePermission?.granted) {
-      const { granted } = await requestSavePermission();
-      if (!granted) return;
+    const { granted } = await MediaLibrary.requestPermissionsAsync();
+    if (!granted) {
+      Alert.alert('Permission needed', 'Allow photo library access in Settings to save images.');
+      return;
     }
     try {
       const asset = await MediaLibrary.createAssetAsync(url);
@@ -182,7 +184,7 @@ const ImageGallery = memo(function ImageGallery({
     } catch {
       Alert.alert('Error', 'Could not save the image.');
     }
-  }, [savePermission, requestSavePermission]);
+  }, []);
 
   if (!images.length) return null;
 
@@ -190,12 +192,16 @@ const ImageGallery = memo(function ImageGallery({
     <View style={{ marginTop: 10 }}>
       <ScrollView
         horizontal
-        pagingEnabled={false}
         showsHorizontalScrollIndicator={false}
         decelerationRate="fast"
         snapToInterval={CARD_W + 10}
         snapToAlignment="start"
         contentContainerStyle={{ paddingRight: 16, gap: 10 }}
+        onScroll={e => {
+          const idx = Math.round(e.nativeEvent.contentOffset.x / (CARD_W + 10));
+          setActiveIdx(Math.max(0, Math.min(idx, images.length - 1)));
+        }}
+        scrollEventThrottle={16}
       >
         {images.map((img, i) => (
           <TouchableOpacity
@@ -217,6 +223,13 @@ const ImageGallery = memo(function ImageGallery({
           </TouchableOpacity>
         ))}
       </ScrollView>
+      {images.length > 1 && (
+        <View style={ig.dots}>
+          {images.map((_, i) => (
+            <View key={i} style={[ig.dot, i === activeIdx && ig.dotActive]} />
+          ))}
+        </View>
+      )}
     </View>
   );
 });
@@ -231,6 +244,9 @@ const ig = StyleSheet.create({
   caption: { padding: 10 },
   captionText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, lineHeight: 17 },
   hint: { color: 'rgba(255,255,255,0.25)', fontSize: 10, marginTop: 4 },
+  dots: { flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 },
+  dot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: 'rgba(255,255,255,0.2)' },
+  dotActive: { backgroundColor: 'rgba(255,255,255,0.65)', width: 14 },
 });
 
 function detectMode(text: string): Mode {
@@ -577,7 +593,7 @@ export default function ChatScreen() {
       title,
       createdAt: parseInt(convIdRef.current.replace('conv-', ''), 10),
       messages: msgs
-        .filter(m => !m.isError)
+        .filter(m => !m.isError && !m.isPending)
         .map(({ id, role, content, mode: m }) => ({ id, role, content, mode: m })),
     }).catch(() => {});
   };
@@ -614,7 +630,14 @@ export default function ChatScreen() {
       replyToId: capturedReply?.id,
       imageUri: capturedImage?.uri,
     };
-    const withUser = [...messages, userMsg];
+    const placeholderMsg: Message | null = capturedImage && mode === 'teach' ? {
+      id: `p-${Date.now()}`,
+      role: 'agent',
+      content: 'Filing your image to the collective...',
+      mode,
+      isPending: true,
+    } : null;
+    const withUser = placeholderMsg ? [...messages, userMsg, placeholderMsg] : [...messages, userMsg];
     setMessages(withUser);
     setInput('');
     setSending(true);
@@ -671,7 +694,7 @@ export default function ChatScreen() {
         mode,
         images: json.images?.length ? json.images : undefined,
       };
-      const final = [...withUser, agentMsg];
+      const final = [...withUser.filter(m => !m.isPending), agentMsg];
       if (mounted.current) {
         setMessages(final);
         persistConversation(final);
@@ -682,7 +705,7 @@ export default function ChatScreen() {
       if (!mounted.current) return;
       const msg = err instanceof Error ? err.message : 'Unable to connect. Check your connection.';
       setMessages(prev => [
-        ...prev,
+        ...prev.filter(m => !m.isPending),
         { id: `e-${Date.now()}`, role: 'agent', content: msg, mode, isError: true },
       ]);
     } finally {
@@ -852,6 +875,11 @@ export default function ChatScreen() {
                           <Text style={s.retryText}>Retry</Text>
                         </TouchableOpacity>
                       </>
+                    ) : msg.isPending ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <ActivityIndicator size="small" color={T.muted} />
+                        <Text style={[s.msgTextAgent, { color: T.muted }]}>{msg.content}</Text>
+                      </View>
                     ) : (
                       <TouchableOpacity
                         activeOpacity={1}
