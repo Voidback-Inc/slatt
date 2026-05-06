@@ -75,10 +75,7 @@ When someone asks you something:
 If someone asks what you know or what topics you cover: don't list anything. Just say you know a lot and to ask you anything.
 
 CRITICAL — image rule:
-The app handles images automatically — you never need to include image URLs or [IMAGE: ...] tags in your response. Images are surfaced to the user separately based on what you discuss. Just answer naturally; visuals are taken care of.
-- Never output image URLs or [IMAGE: ...] tags in your response text.
-- Never fabricate URLs.
-- For funny/meme moments: keep your reply short and punchy — the image speaks for itself.
+Never include image URLs or [IMAGE: ...] tags in your response text — ever. Never fabricate URLs. Never tell the user how images work internally or mention anything about "surfacing" or "automatic rendering". If the user asks whether you have an image of something, just answer the question naturally (e.g. "yeah, got one" or "I don't have a visual on that one") — don't explain the mechanism. For funny/meme moments: keep your reply short and punchy.
 Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 💀 or 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
 
 On your name — only bring this up if someone specifically asks why you're called slatt or how you got your name:
@@ -717,23 +714,27 @@ Deno.serve(async (req) => {
               allImages = cappedUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
             }
 
-            // Priority 2 (always runs if Priority 1 found nothing): description search.
-            // Only use relevant_entities — raw message words are too noisy and match unrelated images.
+            // Priority 2: description search combining relevant_entities + significant message words.
+            // Using both gives two chances to match when one source doesn't have the right terms.
             if (!allImages.length) {
+              const STOP = new Set(['show', 'tell', 'give', 'find', 'look', 'make', 'take', 'send', 'need', 'know', 'like', 'have', 'also', 'just', 'does', 'more', 'some', 'here', 'this', 'that', 'with', 'from', 'what', 'about', 'image', 'photo', 'picture', 'visual', 'collective', 'slatt', 'there', 'them', 'they', 'your', 'their']);
+
               const rawEntities = Array.isArray(chatResult?.relevant_entities) ? chatResult.relevant_entities : [];
-              const entities: string[] = rawEntities
+              const entityTerms: string[] = rawEntities
                 .filter((e: any) => e != null)
                 .map((e: any) => (typeof e === 'string' ? e : typeof e === 'object' ? String(e.name ?? e.value ?? '') : String(e)))
-                .filter((e: string) => e.length >= 4);
+                .filter((e: string) => e.length >= 4 && !STOP.has(e.toLowerCase()));
 
-              // Strip generic words that would match random images in the collective
-              const STOP = new Set(['show', 'tell', 'give', 'find', 'look', 'make', 'take', 'send', 'need', 'know', 'like', 'have', 'also', 'just', 'does', 'more', 'some', 'here', 'this', 'that', 'with', 'from', 'what', 'about', 'image', 'photo', 'picture', 'visual', 'collective', 'slatt']);
+              const msgTerms: string[] = (typeof message === 'string' ? message : '')
+                .split(/\s+/)
+                .filter((w: string) => w.length >= 4 && !STOP.has(w.toLowerCase()));
 
-              const searchTerms = entities
-                .filter((t: string) => !STOP.has(t.toLowerCase()))
-                .map((t: string) => t.replace(/[%_\\]/g, ''))
-                .filter(Boolean)
-                .slice(0, 3);
+              // Union of both, deduplicated, capped at 4
+              const seen = new Set<string>();
+              const searchTerms = [...entityTerms, ...msgTerms]
+                .map((t: string) => t.replace(/[%_\\]/g, '').toLowerCase())
+                .filter((t: string) => { if (!t || seen.has(t)) return false; seen.add(t); return true; })
+                .slice(0, 4);
 
               if (searchTerms.length > 0) {
                 const filters = searchTerms.map((t: string) => `description.ilike.%${t}%`).join(',');
@@ -743,10 +744,9 @@ Deno.serve(async (req) => {
                   .or(filters)
                   .limit(3);
                 if (matched?.length) {
-                  // Deduplicate by URL then cap at 2
-                  const seen = new Set<string>();
+                  const urlSeen = new Set<string>();
                   allImages = matched
-                    .filter((r: any) => { if (seen.has(r.image_url)) return false; seen.add(r.image_url); return true; })
+                    .filter((r: any) => { if (urlSeen.has(r.image_url)) return false; urlSeen.add(r.image_url); return true; })
                     .slice(0, 2)
                     .map((r: any) => ({ url: r.image_url as string, description: r.description as string }));
                 }
