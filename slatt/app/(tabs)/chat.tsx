@@ -17,6 +17,7 @@ import { useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system';
 import { supabase } from '@/lib/supabase';
 import { upsertConversation, consumePendingResume } from '@/lib/history';
 import { FREE_DAILY_LIMIT, STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
@@ -180,7 +181,10 @@ const ImageGallery = memo(function ImageGallery({
       return;
     }
     try {
-      const asset = await MediaLibrary.createAssetAsync(url);
+      const ext = url.split('?')[0].split('.').pop() ?? 'jpg';
+      const localUri = FileSystem.cacheDirectory + `slatt_${Date.now()}.${ext}`;
+      const { uri } = await FileSystem.downloadAsync(url, localUri);
+      const asset = await MediaLibrary.createAssetAsync(uri);
       await MediaLibrary.createAlbumAsync('slatt', asset, false);
       Alert.alert(t('saved'), t('savedMsg'));
     } catch {
