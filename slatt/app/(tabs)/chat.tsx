@@ -185,13 +185,16 @@ const ImageGallery = memo(function ImageGallery({
     }
     setSavingUrl(url);
     try {
-      const ext = url.split('?')[0].split('.').pop() ?? 'jpg';
-      const localUri = FileSystem.cacheDirectory + `slatt_${Date.now()}.${ext}`;
+      const rawExt = url.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
+      const ext = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(rawExt) ? rawExt : 'jpg';
+      const cacheDir = FileSystem.cacheDirectory ?? 'file:///tmp/';
+      const localUri = cacheDir + `slatt_${Date.now()}.${ext}`;
       const { uri } = await FileSystem.downloadAsync(url, localUri);
       const asset = await MediaLibrary.createAssetAsync(uri);
-      await MediaLibrary.createAlbumAsync('slatt', asset, false);
+      // Album creation requires full library access — don't fail the save if it errors
+      try { await MediaLibrary.createAlbumAsync('slatt', asset, false); } catch {}
       Alert.alert(t('saved'), t('savedMsg'));
-    } catch {
+    } catch (e) {
       Alert.alert('Error', t('couldNotSave'));
     } finally {
       setSavingUrl(null);
@@ -201,52 +204,51 @@ const ImageGallery = memo(function ImageGallery({
   if (!images.length) return null;
 
   return (
-    <View style={{ marginTop: 10 }}>
+    <View style={ig.wrap}>
       {images.length > 1 && (
         <View style={ig.swipeHint}>
           <Feather name="chevrons-right" size={11} color="rgba(255,255,255,0.3)" />
           <Text style={ig.swipeText}>swipe for more</Text>
         </View>
       )}
-      {/* Explicit-height wrapper prevents the horizontal ScrollView from expanding infinitely inside a vertical ScrollView */}
-      <View style={{ height: 228 }}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        decelerationRate="fast"
-        snapToInterval={CARD_W + 10}
-        snapToAlignment="start"
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingRight: 16, gap: 10 }}
-        onScroll={e => {
-          const idx = Math.round(e.nativeEvent.contentOffset.x / (CARD_W + 10));
-          setActiveIdx(Math.max(0, Math.min(idx, images.length - 1)));
-        }}
-        scrollEventThrottle={16}
-      >
-        {images.map((img, i) => (
-          <TouchableOpacity
-            key={i}
-            activeOpacity={0.92}
-            onPress={() => setViewerUrl(img.url)}
-            style={[ig.card, { width: CARD_W }]}
-          >
-            <Image source={{ uri: img.url }} style={ig.img} resizeMode="cover" />
+      <View style={ig.scrollWrap}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          decelerationRate="fast"
+          snapToInterval={CARD_W + 10}
+          snapToAlignment="start"
+          style={ig.scroll}
+          contentContainerStyle={{ paddingRight: 16, gap: 10 }}
+          onScroll={e => {
+            const idx = Math.round(e.nativeEvent.contentOffset.x / (CARD_W + 10));
+            setActiveIdx(Math.max(0, Math.min(idx, images.length - 1)));
+          }}
+          scrollEventThrottle={16}
+        >
+          {images.map((img, i) => (
             <TouchableOpacity
-              style={ig.saveBtn}
-              onPress={() => handleSave(img.url)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              key={i}
+              activeOpacity={0.92}
+              onPress={() => setViewerUrl(img.url)}
+              style={[ig.card, { width: CARD_W }]}
             >
-              {savingUrl === img.url
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Feather name="download" size={14} color="#fff" />}
+              <Image source={{ uri: img.url }} style={ig.img} resizeMode="cover" />
+              <TouchableOpacity
+                style={ig.saveBtn}
+                onPress={() => handleSave(img.url)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                {savingUrl === img.url
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Feather name="download" size={14} color="#fff" />}
+              </TouchableOpacity>
+              <View style={ig.caption}>
+                <Text style={ig.captionText} numberOfLines={2}>{img.description}</Text>
+              </View>
             </TouchableOpacity>
-            <View style={ig.caption}>
-              <Text style={ig.captionText} numberOfLines={2}>{img.description}</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+          ))}
+        </ScrollView>
       </View>
       {images.length > 1 && (
         <View style={ig.dots}>
@@ -279,12 +281,15 @@ const ImageGallery = memo(function ImageGallery({
 });
 
 const ig = StyleSheet.create({
+  wrap: { marginTop: 8, width: SCREEN_W - 32 },
+  scrollWrap: { height: 228, overflow: 'hidden' },
+  scroll: { flex: 1 },
   card: {
     borderRadius: 16, overflow: 'hidden',
     backgroundColor: '#111',
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
   },
-  img: { width: '100%', height: 168 },
+  img: { width: '100%', height: 172 },
   saveBtn: {
     position: 'absolute', top: 10, right: 10,
     width: 32, height: 32, borderRadius: 16,
@@ -929,45 +934,47 @@ export default function ChatScreen() {
                   </Animated.View>
                 </SwipeableMessage>
               ) : (
-                <SwipeableMessage key={msg.id} onReply={msg.isError ? () => {} : () => setReplyTo(msg)}>
-                  <Animated.View
-                    entering={FadeInDown.duration(220)}
-                    style={[s.msgAgent, msg.isError && s.msgAgentError]}
-                  >
-                    <Text style={s.agentLabel}>{msg.isError ? '⚠  error' : 'slatt'}</Text>
-                    {replyMsg && (
-                      <View style={[s.replyQuote, s.replyQuoteAgent]}>
-                        <Text style={s.replyQuoteLabel}>{replyMsg.role === 'user' ? 'You' : 'slatt'}</Text>
-                        <Text style={s.replyQuoteText} numberOfLines={2}>{replyMsg.content}</Text>
-                      </View>
-                    )}
-                    {msg.isError ? (
-                      <>
-                        <Text style={[s.msgTextAgent, s.msgTextError]}>{msg.content}</Text>
-                        <TouchableOpacity onPress={retryLast} style={s.retryBtn} activeOpacity={0.7}>
-                          <Feather name="refresh-cw" size={11} color="#FF6B6B" />
-                          <Text style={s.retryText}>Retry</Text>
+                <View key={msg.id}>
+                  <SwipeableMessage onReply={msg.isError ? () => {} : () => setReplyTo(msg)}>
+                    <Animated.View
+                      entering={FadeInDown.duration(220)}
+                      style={[s.msgAgent, msg.isError && s.msgAgentError]}
+                    >
+                      <Text style={s.agentLabel}>{msg.isError ? '⚠  error' : 'slatt'}</Text>
+                      {replyMsg && (
+                        <View style={[s.replyQuote, s.replyQuoteAgent]}>
+                          <Text style={s.replyQuoteLabel}>{replyMsg.role === 'user' ? 'You' : 'slatt'}</Text>
+                          <Text style={s.replyQuoteText} numberOfLines={2}>{replyMsg.content}</Text>
+                        </View>
+                      )}
+                      {msg.isError ? (
+                        <>
+                          <Text style={[s.msgTextAgent, s.msgTextError]}>{msg.content}</Text>
+                          <TouchableOpacity onPress={retryLast} style={s.retryBtn} activeOpacity={0.7}>
+                            <Feather name="refresh-cw" size={11} color="#FF6B6B" />
+                            <Text style={s.retryText}>Retry</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : msg.isPending ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <ActivityIndicator size="small" color={T.muted} />
+                          <Text style={[s.msgTextAgent, { color: T.muted }]}>{msg.content}</Text>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          onLongPress={() => Share.share({ message: msg.content })}
+                          delayLongPress={400}
+                        >
+                          <MarkdownText text={msg.content} style={s.msgTextAgent} />
                         </TouchableOpacity>
-                      </>
-                    ) : msg.isPending ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <ActivityIndicator size="small" color={T.muted} />
-                        <Text style={[s.msgTextAgent, { color: T.muted }]}>{msg.content}</Text>
-                      </View>
-                    ) : (
-                      <TouchableOpacity
-                        activeOpacity={1}
-                        onLongPress={() => Share.share({ message: msg.content })}
-                        delayLongPress={400}
-                      >
-                        <MarkdownText text={msg.content} style={s.msgTextAgent} />
-                      </TouchableOpacity>
-                    )}
-                    {msg.images && msg.images.length > 0 && (
-                      <ImageGallery images={msg.images} />
-                    )}
-                  </Animated.View>
-                </SwipeableMessage>
+                      )}
+                    </Animated.View>
+                  </SwipeableMessage>
+                  {msg.images && msg.images.length > 0 && (
+                    <ImageGallery images={msg.images} />
+                  )}
+                </View>
               );
             })}
           </ScrollView>
