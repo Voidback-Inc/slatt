@@ -195,13 +195,14 @@ const ImageGallery = memo(function ImageGallery({
   if (!images.length) return null;
 
   return (
-    <View style={{ marginTop: 10 }}>
+    <View style={{ marginTop: 10, height: 260 }}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         decelerationRate="fast"
         snapToInterval={CARD_W + 10}
         snapToAlignment="start"
+        style={{ height: 240 }}
         contentContainerStyle={{ paddingRight: 16, gap: 10 }}
         onScroll={e => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / (CARD_W + 10));
@@ -749,10 +750,12 @@ export default function ChatScreen() {
         Alert.alert(t('permissionNeeded'), 'Could not read image data. Try a different image.');
         return;
       }
+      const rawMime = asset.mimeType ?? 'image/jpeg';
+      const safeMime = /heic|heif|webp/i.test(rawMime) ? 'image/jpeg' : rawMime;
       setPendingImage({
         uri: asset.uri,
         base64: asset.base64,
-        mimeType: asset.mimeType ?? 'image/jpeg',
+        mimeType: safeMime,
       });
     }
   }, []);

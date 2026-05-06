@@ -243,6 +243,9 @@ async function analyzeImage(
   mimeType: string,
   userCaption: string,
 ): Promise<{ safe: boolean; description: string; ack: string }> {
+  // Anthropic only accepts jpeg/png/gif/webp — normalize HEIC and anything else to jpeg
+  const safeMime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mimeType)
+    ? mimeType : 'image/jpeg';
   try {
     const res = await withTimeout(
       fetch('https://api.anthropic.com/v1/messages', {
@@ -258,7 +261,7 @@ async function analyzeImage(
           messages: [{
             role: 'user',
             content: [
-              { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } },
+              { type: 'image', source: { type: 'base64', media_type: safeMime, data: imageBase64 } },
               {
                 type: 'text',
                 text: `Analyze this image. Reply in EXACTLY this format (three lines, nothing else):
@@ -582,18 +585,12 @@ Deno.serve(async (req) => {
         const [chatResult, imageResult] = await Promise.all([
           withTimeout(agent.chat(message, history), 25000),
           isImageRequest
-            // Visual request: skip FTS and return recent images so semantic retrieval via agent tags works
             ? supabase
                 .from('collective_images')
                 .select('image_url, description')
                 .order('created_at', { ascending: false })
                 .limit(12)
-            : supabase
-                .from('collective_images')
-                .select('image_url, description')
-                .textSearch('fts', message, { type: 'websearch', config: 'english' })
-                .order('created_at', { ascending: false })
-                .limit(8),
+            : Promise.resolve({ data: [] }),
         ]);
 
         // Extract [IMAGE: url] tags AND bare Supabase storage URLs that leaked through
@@ -611,21 +608,25 @@ Deno.serve(async (req) => {
           .trim();
 
         // Fetch descriptions for inline image URLs from the DB
-        const ftsImages = (imageResult.data ?? []).map((r: any) => ({ url: r.image_url, description: r.description }));
         let allImages: { url: string; description: string }[];
 
         if (inlineUrls.length > 0) {
+          // Agent explicitly referenced these images — always show them
           const { data: inlineData } = await supabase
             .from('collective_images')
             .select('image_url, description')
             .in('image_url', inlineUrls);
           const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
-          // Inline images first (agent directly referenced them), then FTS/recent images
           const inlineImages = inlineUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
+          const ftsImages = (imageResult.data ?? []).map((r: any) => ({ url: r.image_url, description: r.description }));
           const seen = new Set(inlineUrls);
           allImages = [...inlineImages, ...ftsImages.filter((i: any) => !seen.has(i.url))].slice(0, 8);
+        } else if (isImageRequest) {
+          // User asked for images explicitly — show recent/FTS results
+          allImages = (imageResult.data ?? []).map((r: any) => ({ url: r.image_url, description: r.description })).slice(0, 8);
         } else {
-          allImages = ftsImages.slice(0, 8);
+          // Regular question — no images
+          allImages = [];
         }
 
         body = {
