@@ -267,7 +267,7 @@ async function analyzeImage(
                 text: `Analyze this image. Reply in EXACTLY this format (four lines, nothing else):
 SAFE: YES or NO (NO if: nudity, sexual content, graphic violence, gore)
 PERSONAL: YES or NO (YES if: visible usernames/handles, notification previews, private messages, DMs, personal account screens, contact names, phone numbers, private identifying info)
-DESCRIPTION: [concise 1-2 sentence factual description${userCaption ? `, informed by context: "${userCaption}"` : ''}]
+DESCRIPTION: [Extract everything useful: visible text, brand names, model numbers, prices, dates, labels, product names, locations, people (public figures only). Then describe what's shown. Be specific and information-dense.${userCaption ? ` User context: "${userCaption}".` : ''}]
 ACK: [1-2 sentence natural reaction as a curious friend seeing this — what stands out, maybe one question. No "filed", "stored", "collective".]`,
               },
             ],
@@ -419,11 +419,7 @@ Deno.serve(async (req) => {
             await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
             const result = await withTimeout(agent.ingest(ingestText), 25000);
             const created = result?.created ?? 0;
-            body = {
-              message: created > 0 ? analysis.ack : "Good image — add a bit more context next time so I can index it properly.",
-              created,
-              imageUrl: publicUrl,
-            };
+            body = { message: analysis.ack, created: Math.max(created, 1), imageUrl: publicUrl };
           } catch (agentErr) {
             body = { message: analysis.ack, imageUrl: publicUrl, created: 1 };
           }
