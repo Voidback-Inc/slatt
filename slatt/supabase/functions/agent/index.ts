@@ -195,16 +195,10 @@ REJECT: Say why briefly, 1 sentence.`,
 
 // ── Misc helpers ──────────────────────────────────────────────────────────────
 
-function worthStoring(text: string): { ok: boolean; reason?: string } {
+function worthStoring(text: string): { ok: boolean } {
   const t = text.trim();
-  // Social/greeting phrases — check before length so "bonjour", "hola", etc. route to chat
-  if (/^(hi|hey|hello|bonjour|hola|ciao|hallo|salut|oi|olá|привет|مرحبا|こんにちは|안녕|你好|ok|okay|yes|no|sure|thanks|thank you|merci|gracias|danke|lol|haha|sup|test|yo|gm|gn|morning|evening)[\s!.?🙂👋]*$/i.test(t)) {
-    return { ok: false, reason: null }; // route to chat
-  }
-  if (t.length < 10) return { ok: false, reason: null }; // too short — route to chat, don't lecture
-  if (t.endsWith('?') && t.split(/\s+/).length < 7) {
-    return { ok: false, reason: "Looks like a question — hit Ask mode and I'll answer it." };
-  }
+  if (t.length < 10) return { ok: false };
+  if (t.endsWith('?') && t.split(/\s+/).length < 7) return { ok: false };
   return { ok: true };
 }
 
@@ -512,23 +506,17 @@ Deno.serve(async (req) => {
       } else {
         // ── Standard new teach ────────────────────────────────────────────────────
 
-        // Step 1: quick pre-filter
+        // Step 1: quick pre-filter — not a lesson, just talk
         const check = worthStoring(message);
         if (!check.ok) {
-          if (check.reason) {
-            isSkipped = true;
-            body = { message: check.reason, skipped: true };
-          } else {
-            // Short/greeting/social — just chat naturally instead of lecturing
-            isSkipped = true;
-            try {
-              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
-              const result = await withTimeout(agent.chat(message, history), 25000);
-              body = { message: result.response };
-            } catch {
-              body = { message: "hey 👋", skipped: true };
-            }
+          isSkipped = true;
+          try {
+            const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+            await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
+            const result = await withTimeout(agent.chat(message, history), 25000);
+            body = { message: result.response };
+          } catch {
+            body = { message: "hey", skipped: true };
           }
         } else {
           // Step 2: AI evaluation + natural acknowledgment (single call)
