@@ -694,10 +694,11 @@ Deno.serve(async (req) => {
             .replace(/\n{3,}/g, '\n\n')
             .trim();
 
-          // Only show images the agent explicitly chose — hard cap at 3, no dumps
           let allImages: { url: string; description: string }[] = [];
-          const cappedUrls = inlineUrls.slice(0, 3);
+          const cappedUrls = inlineUrls.slice(0, 2);
+
           if (cappedUrls.length > 0) {
+            // Agent explicitly included image URLs — use those
             const { data: inlineData } = await supabase
               .from('collective_images')
               .select('image_url, description')
@@ -705,8 +706,29 @@ Deno.serve(async (req) => {
             const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
             allImages = cappedUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
           } else if (learnedImageUrl && learnedImageDescription) {
-            // Echo back the just-uploaded image as confirmation it was received
+            // Echo back the just-uploaded image
             allImages = [{ url: learnedImageUrl, description: learnedImageDescription }];
+          } else {
+            // Fallback: agent may have stripped the [IMAGE: url] tag internally.
+            // Search collective_images by description relevance using the entities
+            // the agent actually discussed, then fall back to significant words in the message.
+            const entities: string[] = chatResult.relevant_entities ?? [];
+            const searchTerms = (entities.length > 0
+              ? entities.slice(0, 3)
+              : message.split(/\s+/).filter((w: string) => w.length > 4).slice(0, 3)
+            ).map((t: string) => t.replace(/[%_]/g, ''));
+
+            if (searchTerms.length > 0) {
+              const filters = searchTerms.map((t: string) => `description.ilike.%${t}%`).join(',');
+              const { data: matched } = await supabase
+                .from('collective_images')
+                .select('image_url, description')
+                .or(filters)
+                .limit(2);
+              if (matched?.length) {
+                allImages = matched.map((r: any) => ({ url: r.image_url as string, description: r.description as string }));
+              }
+            }
           }
 
           body = {
