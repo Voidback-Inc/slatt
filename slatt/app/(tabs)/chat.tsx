@@ -803,7 +803,7 @@ export default function ChatScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      quality: 0.6,
+      quality: 0.35,
       base64: true,
       exif: false,
       allowsEditing: false,
