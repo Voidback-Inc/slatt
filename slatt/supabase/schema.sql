@@ -38,6 +38,46 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
+-- ── Images storage bucket ─────────────────────────────────────────────────────
+insert into storage.buckets (id, name, public)
+values ('images', 'images', true)
+on conflict (id) do nothing;
+
+create policy "Anyone can read images"
+  on storage.objects for select
+  using (bucket_id = 'images');
+
+create policy "Authenticated users can upload images"
+  on storage.objects for insert
+  with check (bucket_id = 'images' and auth.role() = 'authenticated');
+
+-- ── Collective images table ───────────────────────────────────────────────────
+create table if not exists public.collective_images (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid references auth.users(id) on delete cascade not null,
+  image_url    text not null,
+  description  text not null,
+  created_at   timestamptz default now()
+);
+
+alter table public.collective_images enable row level security;
+
+create policy "Anyone can read collective images"
+  on public.collective_images for select
+  using (true);
+
+create policy "Users can insert own images"
+  on public.collective_images for insert
+  with check (auth.uid() = user_id);
+
+-- Full-text search index on description
+alter table public.collective_images
+  add column if not exists fts tsvector
+  generated always as (to_tsvector('english', description)) stored;
+
+create index if not exists collective_images_fts_idx
+  on public.collective_images using gin(fts);
+
 -- Edge function secrets to set in Supabase dashboard → Settings → Edge Functions:
 --   ANTONLYTICS_API_KEY      your Antonlytics API key
 --   ANTONLYTICS_PROJECT_ID   your shared Antonlytics project ID

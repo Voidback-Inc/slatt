@@ -3,7 +3,19 @@ import { Agent } from 'https://esm.sh/antonlytics@2.0.0';
 
 const FREE_DAILY_LIMIT = 30;
 
-const SYSTEM_PROMPT = `You are slatt — extremely intelligent, well-read, and direct. You have access to a collective knowledge base built from contributions by many different people, and you also think for yourself.
+function buildSystemPrompt(): string {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  return `Today's date is ${dateStr}.\n\n` + SYSTEM_PROMPT_BASE;
+}
+
+function stampDate(text: string): string {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  return `[Taught on: ${dateStr}]\n${text}`;
+}
+
+const SYSTEM_PROMPT_BASE = `You are slatt — extremely intelligent, well-read, and direct. You have access to a collective knowledge base built from contributions by many different people, and you also think for yourself.
 
 CRITICAL — never break this rule:
 You know NOTHING about the person you are currently talking to unless they tell you in this exact conversation. The collective knowledge was contributed by OTHER people entirely. Never say "I know you did X", "you mentioned Y", "as you experienced", or anything that implies personal history with the current user. You don't have any. Treat every user as a complete stranger you are meeting for the first time.
@@ -198,14 +210,23 @@ REJECT: [one sentence]`,
 
 function worthStoring(text: string): { ok: boolean; reason?: string } {
   const t = text.trim();
-  if (t.length < 10) return { ok: false, reason: "Too brief. Give me more to work with." };
-  if (/^(hi|hey|hello|test|ok|okay|yes|no|sure|thanks|thank you|lol|haha|sup)[\s!.?]*$/i.test(t)) {
-    return { ok: false, reason: "That's a greeting, not an insight. Drop something real." };
+  if (t.length < 10) return { ok: false, reason: "That's a bit short — give me a little more to work with." };
+  if (/^(hi|hey|hello|ok|okay|yes|no|sure|thanks|thank you|lol|haha|sup|test)[\s!.?]*$/i.test(t)) {
+    return { ok: false, reason: null }; // handled as conversational
   }
   if (t.endsWith('?') && t.split(/\s+/).length < 7) {
-    return { ok: false, reason: "Reads like a question. Switch to Ask mode." };
+    return { ok: false, reason: "Looks like a question — hit Ask mode and I'll answer it." };
   }
   return { ok: true };
+}
+
+// Detect conversational meta-comments that aren't actually teachings
+function isConversational(text: string, history: HistoryMessage[]): boolean {
+  const t = text.trim().toLowerCase();
+  if (/\b(just test(ing)?|was test(ing)?|testing (you|u)|i was jok(ing)?|just joking|just kidding|j\/k|not (really|serious)|i lied|i made (that|it) up|was messing with (you|u))\b/.test(t)) return true;
+  if (/^(lol|lmao|haha+|😂|🤣|💀|fr|facts|word|bet|damn|wild|crazy|no way|for real|really\?|seriously\?)\s*[!.?]*$/.test(t)) return true;
+  if (history.length >= 2 && t.split(/\s+/).length <= 6 && /\b(i (meant|mean)|that was|my (last|previous)|what i (said|meant)|earlier|before)\b/.test(t)) return true;
+  return false;
 }
 
 // Returns true if the message sounds like the user confirming personal/anecdotal experience
@@ -227,12 +248,9 @@ function detectFollowUpContext(history: HistoryMessage[]): { isPending: boolean;
   const reversed = [...history].reverse();
   const lastAgent = reversed.find(h => h.role === 'assistant');
   if (!lastAgent) return { isPending: false };
-  // Only match the exact NEEDS_EVIDENCE and "still not enough" gate responses — not generic
-  // answers that happen to mention words like "source" or "evidence" in a different context.
   const isPendingResponse = (
-    /receipts before it goes in/i.test(lastAgent.content) ||
-    /file it as personal experience/i.test(lastAgent.content) ||
-    /drop a source or link/i.test(lastAgent.content) ||
+    /quick thing.*company/i.test(lastAgent.content) ||
+    /drop a link/i.test(lastAgent.content) ||
     /still not enough.*drop an actual link/i.test(lastAgent.content)
   );
   if (!isPendingResponse) return { isPending: false };
@@ -270,6 +288,55 @@ function acknowledge(text: string, created: number, trustedDomain?: string | nul
     `Solid.\n\n"${clip}"\n\nThe collective sees it.${sourceNote}`,
   ];
   return picks[text.length % picks.length];
+}
+
+// ── Image analysis (NSFW check + description) ─────────────────────────────────
+
+async function analyzeImage(
+  anthropicKey: string,
+  imageBase64: string,
+  mimeType: string,
+  userCaption: string,
+): Promise<{ safe: boolean; reason?: string; description?: string }> {
+  try {
+    const res = await withTimeout(
+      fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 400,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } },
+              {
+                type: 'text',
+                text: `Analyze this image. Respond in EXACTLY this format (two lines, no extra text):
+SAFE: YES or NO (NO if: nudity, sexual content, graphic violence, gore, or identifiable private individuals who are not widely known public figures)
+DESCRIPTION: [concise 1-3 sentence description of what's shown${userCaption ? `, considering the user's context: "${userCaption}"` : ''}]`,
+              },
+            ],
+          }],
+        }),
+      }),
+      15000,
+    );
+    if (!res.ok) return { safe: true, description: userCaption || 'Image' };
+    const data = await res.json();
+    const text: string = data.content?.[0]?.text ?? '';
+    const safeMatch = text.match(/SAFE:\s*(YES|NO)/i);
+    const descMatch = text.match(/DESCRIPTION:\s*(.+)/i);
+    const safe = safeMatch ? safeMatch[1].toUpperCase() === 'YES' : true;
+    const description = descMatch ? descMatch[1].trim() : (userCaption || 'Image');
+    return { safe, description };
+  } catch {
+    return { safe: true, description: userCaption || 'Image' };
+  }
 }
 
 Deno.serve(async (req) => {
@@ -332,7 +399,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { action, message, history = [] } = await req.json();
+    const { action, message, history = [], imageBase64, imageMimeType } = await req.json();
     if (!action || !message) {
       return new Response(JSON.stringify({ error: 'Missing action or message' }), { status: 400, headers: cors });
     }
@@ -355,29 +422,99 @@ Deno.serve(async (req) => {
         }
       }
 
-      // ── Follow-up detection (proof or anecdotal confirmation) ────────────────
+      // ── Image teach path ──────────────────────────────────────────────────────
+      if (imageBase64 && ANTHROPIC_API_KEY) {
+        const mime = (imageMimeType as string) || 'image/jpeg';
+        const analysis = await analyzeImage(ANTHROPIC_API_KEY, imageBase64 as string, mime, message);
+
+        if (!analysis.safe) {
+          isSkipped = true;
+          body = { message: "That image can't go into the collective — it contains content that's not allowed (NSFW, graphic, or private individuals).", skipped: true };
+        } else {
+          // Upload to Supabase storage
+          const imageBytes = Uint8Array.from(atob(imageBase64 as string), c => c.charCodeAt(0));
+          const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : 'jpg';
+          const filePath = `${user.id}/${Date.now()}.${ext}`;
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('images')
+            .upload(filePath, imageBytes, { contentType: mime, upsert: false });
+
+          if (uploadError) {
+            isSkipped = true;
+            body = { message: "Couldn't upload the image right now. Try again.", skipped: true };
+          } else {
+            const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(uploadData.path);
+            const description = analysis.description!;
+
+            // Store in collective_images table
+            await supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description });
+
+            // Ingest into Antonlytics with image URL embedded
+            const ingestText = stampDate(
+              `${description}${message ? `\n\nContributor context: ${message}` : ''}\n\n[IMAGE: ${publicUrl}]`
+            );
+            try {
+              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+              await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+              const result = await withTimeout(agent.ingest(ingestText), 25000);
+              const created = result?.created ?? 0;
+              body = {
+                message: created > 0
+                  ? `Locked in.\n\n"${description.length > 110 ? description.slice(0, 107) + '...' : description}"\n\nImage filed in the collective.`
+                  : "Image saved but the description was too vague to index well. Add more context next time.",
+                created,
+                imageUrl: publicUrl,
+              };
+            } catch (agentErr) {
+              body = { message: `Image saved but couldn't index it: ${(agentErr as Error).message}`, imageUrl: publicUrl, created: 1 };
+            }
+          }
+        }
+      }
+
+      // ── Conversational / question-in-teach → route through chat ───────────────
+      else if (isConversational(message, history)) {
+        isSkipped = true;
+        try {
+          const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+          await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+          const result = await withTimeout(agent.chat(message, history), 25000);
+          body = { message: result.response };
+        } catch {
+          body = { message: "lol got you.", skipped: true };
+        }
+      } else if (
+        message.trim().endsWith('?') ||
+        /^(what|how|why|when|where|who|which|can you|do you|does |is |are |will |would |could |should |tell me|explain|help|list|define|summarize)/i.test(message.trim())
+      ) {
+        // Question sent in teach mode — answer it
+        try {
+          const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+          await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+          const result = await withTimeout(agent.chat(message, history), 25000);
+          body = { message: result.response, created: 1 };
+        } catch (agentErr) {
+          return new Response(
+            JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
+            { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
+          );
+        }
+      } else {
+
+      // ── Follow-up detection ────────────────────────────────────────────────────
       const { isPending, originalClaim } = detectFollowUpContext(history);
 
       if (isPending && originalClaim) {
-        if (isAnecdotalConfirmation(message)) {
-          // User confirmed it's personal experience — ingest as anecdotal
-          const anecdotalText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${originalClaim}`;
+        if (isConversational(message, history)) {
+          // User is dismissing the pending request (e.g. "i was joking") — respond naturally
+          isSkipped = true;
           try {
             const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-            await withTimeout(agent.setSystemPrompt(SYSTEM_PROMPT), 10000).catch(() => {});
-            const result = await withTimeout(agent.ingest(anecdotalText), 25000);
-            const created = result?.created ?? 0;
-
-            if (created === 0) {
-              body = { message: "Appreciated, but too vague to file anything useful. Add a bit more detail about what you experienced.", created: 0 };
-            } else {
-              body = { message: acknowledgeAnecdotal(originalClaim), created };
-            }
-          } catch (agentErr) {
-            return new Response(
-              JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
-              { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
-            );
+            await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+            const result = await withTimeout(agent.chat(message, history), 25000);
+            body = { message: result.response };
+          } catch {
+            body = { message: "all good, no worries.", skipped: true };
           }
         } else {
           // User is providing proof — need a legit URL or at least 60 chars of context
@@ -386,19 +523,19 @@ Deno.serve(async (req) => {
           if (!hasEnoughProof) {
             isSkipped = true;
             body = {
-              message: "Still not enough. Drop an actual link or give me enough specific context to work with.",
+              message: "Still need a bit more — drop a link or give me enough context to work with.",
               skipped: true,
             };
           } else {
             const combinedText = `${originalClaim}\n\nContributor evidence: ${message}${trustedDomain ? ` [Source: ${trustedDomain}]` : ''}`;
             try {
               const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(SYSTEM_PROMPT), 10000).catch(() => {});
-              const result = await withTimeout(agent.ingest(combinedText), 25000);
+              await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+              const result = await withTimeout(agent.ingest(stampDate(combinedText)), 25000);
               const created = result?.created ?? 0;
 
               if (created === 0) {
-                body = { message: "Got the evidence but the claim itself was too vague to extract anything useful. Resubmit with more specifics.", created: 0 };
+                body = { message: "Got the context but the original claim was too vague to file anything useful. Resubmit with more specifics.", created: 0 };
               } else {
                 body = {
                   message: `Verified and filed.\n\n"${originalClaim.length > 100 ? originalClaim.slice(0, 97) + '...' : originalClaim}"\n\nEvidence on record${trustedDomain ? ` (${trustedDomain})` : ''}. Anyone who asks gets the full picture.`,
@@ -422,7 +559,7 @@ Deno.serve(async (req) => {
         const check = worthStoring(message);
         if (!check.ok) {
           isSkipped = true;
-          body = { message: check.reason, skipped: true };
+          body = { message: check.reason ?? "That's more of a chat message — switch to Ask and I'll respond.", skipped: true };
         } else {
           // Step 2: AI evaluation
           if (ANTHROPIC_API_KEY) {
@@ -430,46 +567,37 @@ Deno.serve(async (req) => {
 
             if (evaluation.verdict === 'REJECT') {
               isSkipped = true;
-              body = { message: `Not going in. ${evaluation.reason}`, skipped: true };
+              body = { message: `That one's not quite right for the collective — ${evaluation.reason}`, skipped: true };
             } else if (evaluation.verdict === 'NEEDS_EVIDENCE') {
               isSkipped = true;
               body = {
-                message: "That needs receipts before it goes in — is this from your own experience or did someone you know tell you this? If so, just say so and I'll file it as personal experience. Otherwise drop a source or link.",
+                message: "Quick thing — is this connected to a specific company or something you've come across broadly? A link helps it stick in the collective, but if you don't have one it's all good, just let me know.",
                 skipped: true,
               };
             } else if (evaluation.isAnecdotal) {
-              isSkipped = true;
-              if (!isFirstPersonAccount(message)) {
-                // Third-person claim flagged as anecdotal — ask before assuming
-                body = {
-                  message: "That needs receipts before it goes in — is this from your own experience or did someone you know tell you this? If so, just say so and I'll file it as personal experience. Otherwise drop a source or link.",
-                  skipped: true,
-                };
-              } else {
-                // Clearly first-person — ingest with anecdotal tag directly
-                const anecdotalText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${message}`;
-                try {
-                  const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-                  await withTimeout(agent.setSystemPrompt(SYSTEM_PROMPT), 10000).catch(() => {});
-                  const result = await withTimeout(agent.ingest(anecdotalText), 25000);
-                  const created = result?.created ?? 0;
+              // Anecdotal — accept directly, tag it, no questions asked
+              const anecdotalText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${message}`;
+              try {
+                const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+                await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+                const result = await withTimeout(agent.ingest(stampDate(anecdotalText)), 25000);
+                const created = result?.created ?? 0;
 
-                  if (created === 0) {
-                    body = { message: "Appreciated, but too vague to file anything useful. Add a bit more detail about what you experienced.", created: 0 };
-                  } else {
-                    body = { message: acknowledgeAnecdotal(message), created };
-                  }
-                } catch (agentErr) {
-                  return new Response(
-                    JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
-                    { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
-                  );
+                if (created === 0) {
+                  body = { message: "Appreciate it — add a bit more detail and I can file it properly.", created: 0 };
+                } else {
+                  body = { message: acknowledgeAnecdotal(message), created };
                 }
+              } catch (agentErr) {
+                return new Response(
+                  JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
+                  { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
+                );
               }
             }
           }
 
-          // Step 3: ingest if passed all gates (non-anecdotal)
+          // Step 3: ingest if passed all gates
           if (!isSkipped) {
             const ingestText = hasTrustedUrl
               ? `${message}\n\n[Contributor source: ${trustedDomain}]`
@@ -477,13 +605,13 @@ Deno.serve(async (req) => {
 
             try {
               const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(SYSTEM_PROMPT), 10000).catch(() => {});
-              const result = await withTimeout(agent.ingest(ingestText), 25000);
+              await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+              const result = await withTimeout(agent.ingest(stampDate(ingestText)), 25000);
               const created = result?.created ?? 0;
 
               if (created === 0) {
                 body = {
-                  message: "Couldn't extract anything structured from that — too vague. Tighten it up: concrete outcome, real numbers, specific situation. *Costs 2 credits.*",
+                  message: "Couldn't pull anything structured out of that — too vague. Concrete outcome, real numbers, specific situation.",
                   created: 0,
                 };
               } else {
@@ -502,13 +630,26 @@ Deno.serve(async (req) => {
           }
         }
       }
+      } // end else (not conversational/question)
 
     } else if (action === 'ask') {
       try {
         const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-        await withTimeout(agent.setSystemPrompt(SYSTEM_PROMPT), 10000).catch(() => {});
-        const result = await withTimeout(agent.chat(message, history), 25000);
-        body = { response: result.response, relevant_entities: result.relevant_entities };
+        await withTimeout(agent.setSystemPrompt(buildSystemPrompt()), 10000).catch(() => {});
+        const [chatResult, imageResult] = await Promise.all([
+          withTimeout(agent.chat(message, history), 25000),
+          supabase
+            .from('collective_images')
+            .select('image_url, description')
+            .textSearch('fts', message.split(/\s+/).filter(w => w.length > 3).slice(0, 6).join(' | '))
+            .order('created_at', { ascending: false })
+            .limit(8),
+        ]);
+        body = {
+          response: chatResult.response,
+          relevant_entities: chatResult.relevant_entities,
+          images: (imageResult.data ?? []).map(r => ({ url: r.image_url, description: r.description })),
+        };
       } catch (agentErr) {
         return new Response(
           JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),

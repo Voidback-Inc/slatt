@@ -41,6 +41,21 @@
       ],
       "expo-secure-store",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "slatt uses your photo library so you can share knowledge with images.",
+          "cameraPermission": "slatt uses your camera so you can capture and share knowledge."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow slatt to save images to your photo library.",
+          "savePhotosPermission": "Allow slatt to save images to your photo library.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
         "expo-local-authentication",
         {
           "faceIDPermission": "Allow slatt to use Face ID to confirm your identity when deleting your account."

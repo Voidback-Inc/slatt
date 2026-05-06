@@ -1,9 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, Platform, KeyboardAvoidingView, Alert,
   ActivityIndicator, Modal, Keyboard, Pressable, Linking, Share,
-  Animated as RNAnimated, PanResponder,
+  Animated as RNAnimated, PanResponder, Image, Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,12 +15,16 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import { supabase } from '@/lib/supabase';
 import { upsertConversation, consumePendingResume } from '@/lib/history';
 import { FREE_DAILY_LIMIT, STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
 import { setupIAP, purchasePlan, type PlanKey } from '@/lib/iap';
 import { useProfile } from '@/lib/useProfile';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
+
+const SCREEN_W = Dimensions.get('window').width;
 
 const T = {
   bg: '#000',
@@ -150,7 +154,84 @@ type Message = {
   mode: Mode;
   isError?: boolean;
   replyToId?: string;
+  imageUri?: string;
+  images?: { url: string; description: string }[];
 };
+
+type PendingImage = { uri: string; base64: string; mimeType: string };
+
+// ── Image gallery (ask responses) ─────────────────────────────────────────────
+
+const ImageGallery = memo(function ImageGallery({
+  images,
+}: {
+  images: { url: string; description: string }[];
+}) {
+  const [savePermission, requestSavePermission] = MediaLibrary.usePermissions();
+  const CARD_W = SCREEN_W * 0.72;
+
+  const handleSave = useCallback(async (url: string) => {
+    if (!savePermission?.granted) {
+      const { granted } = await requestSavePermission();
+      if (!granted) return;
+    }
+    try {
+      const asset = await MediaLibrary.createAssetAsync(url);
+      await MediaLibrary.createAlbumAsync('slatt', asset, false);
+      Alert.alert('Saved', 'Image saved to your library.');
+    } catch {
+      Alert.alert('Error', 'Could not save the image.');
+    }
+  }, [savePermission, requestSavePermission]);
+
+  if (!images.length) return null;
+
+  return (
+    <View style={{ marginTop: 10 }}>
+      <ScrollView
+        horizontal
+        pagingEnabled={false}
+        showsHorizontalScrollIndicator={false}
+        decelerationRate="fast"
+        snapToInterval={CARD_W + 10}
+        snapToAlignment="start"
+        contentContainerStyle={{ paddingRight: 16, gap: 10 }}
+      >
+        {images.map((img, i) => (
+          <TouchableOpacity
+            key={i}
+            activeOpacity={0.92}
+            onLongPress={() => handleSave(img.url)}
+            delayLongPress={400}
+            style={[ig.card, { width: CARD_W }]}
+          >
+            <Image
+              source={{ uri: img.url }}
+              style={ig.img}
+              resizeMode="cover"
+            />
+            <View style={ig.caption}>
+              <Text style={ig.captionText} numberOfLines={2}>{img.description}</Text>
+              <Text style={ig.hint}>Hold to save</Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+});
+
+const ig = StyleSheet.create({
+  card: {
+    borderRadius: 16, overflow: 'hidden',
+    backgroundColor: '#111',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
+  },
+  img: { width: '100%', height: 200 },
+  caption: { padding: 10 },
+  captionText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, lineHeight: 17 },
+  hint: { color: 'rgba(255,255,255,0.25)', fontSize: 10, marginTop: 4 },
+});
 
 function detectMode(text: string): Mode {
   const t = text.trim();
@@ -171,7 +252,7 @@ function parseInline(text: string, baseStyle: object): React.ReactNode[] {
     if (m.index > last) parts.push(text.slice(last, m.index));
     const raw = m[0];
     if (raw.startsWith('**')) {
-      parts.push(<Text key={key++} style={[baseStyle, { fontWeight: '700', color: '#fff' }]}>{raw.slice(2, -2)}</Text>);
+      parts.push(<Text key={key++} style={[baseStyle, { fontWeight: '800', color: '#fff' }]}>{raw.slice(2, -2)}</Text>);
     } else if (raw.startsWith('*')) {
       parts.push(<Text key={key++} style={[baseStyle, { fontStyle: 'italic' }]}>{raw.slice(1, -1)}</Text>);
     } else if (raw.startsWith('`')) {
@@ -436,9 +517,9 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<Mode>('teach');
-  const [manualMode, setManualMode] = useState(false);
   const [sending, setSending] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const { profile, reloadProfile } = useProfile();
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<PlanKey | null>(null);
@@ -478,8 +559,8 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
-    if (!manualMode && input.length > 2) setMode(detectMode(input));
-  }, [input, manualMode]);
+    if (input.length > 2) setMode(detectMode(input));
+  }, [input]);
 
   const queriesLeft = profile?.tier === 'free'
     ? Math.min(FREE_DAILY_LIMIT, Math.max(0, FREE_DAILY_LIMIT - (profile.queries_today ?? 0)))
@@ -516,24 +597,26 @@ export default function ChatScreen() {
 
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if ((!text && !pendingImage) || sending) return;
     if (isAtLimit) { setShowPaywall(true); return; }
 
-    lastSentRef.current = { text, mode };
+    lastSentRef.current = { text: text || '(image)', mode };
     const capturedReply = replyTo;
+    const capturedImage = pendingImage;
     setReplyTo(null);
+    setPendingImage(null);
 
     const userMsg: Message = {
       id: `u-${Date.now()}`,
       role: 'user',
-      content: text,
+      content: text || '📷 Image',
       mode,
       replyToId: capturedReply?.id,
+      imageUri: capturedImage?.uri,
     };
     const withUser = [...messages, userMsg];
     setMessages(withUser);
     setInput('');
-    setManualMode(false);
     setSending(true);
 
     try {
@@ -555,7 +638,15 @@ export default function ChatScreen() {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${session?.access_token}`,
           },
-          body: JSON.stringify({ action: mode, message: messageForAgent, history }),
+          body: JSON.stringify({
+            action: mode,
+            message: messageForAgent,
+            history,
+            ...(capturedImage ? {
+              imageBase64: capturedImage.base64,
+              imageMimeType: capturedImage.mimeType,
+            } : {}),
+          }),
         },
       );
 
@@ -573,7 +664,13 @@ export default function ChatScreen() {
         ? (json.message ?? 'Got it, teaching the collective.')
         : (json.response ?? '...');
 
-      const agentMsg: Message = { id: `a-${Date.now()}`, role: 'agent', content, mode };
+      const agentMsg: Message = {
+        id: `a-${Date.now()}`,
+        role: 'agent',
+        content,
+        mode,
+        images: json.images?.length ? json.images : undefined,
+      };
       const final = [...withUser, agentMsg];
       if (mounted.current) {
         setMessages(final);
@@ -591,16 +688,39 @@ export default function ChatScreen() {
     } finally {
       if (mounted.current) setSending(false);
     }
-  }, [input, mode, sending, isAtLimit, messages, replyTo]);
+  }, [input, mode, sending, isAtLimit, messages, replyTo, reloadProfile]);
 
   const newChat = () => {
     setMessages([]);
     setInput('');
-    setManualMode(false);
     setMode('teach');
     setReplyTo(null);
+    setPendingImage(null);
     convIdRef.current = null;
   };
+
+  const pickImage = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow photo library access in Settings to share images.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.6,
+      base64: true,
+      exif: false,
+      allowsEditing: false,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setPendingImage({
+        uri: asset.uri,
+        base64: asset.base64 ?? '',
+        mimeType: asset.mimeType ?? 'image/jpeg',
+      });
+    }
+  }, []);
 
   const handleUpgrade = async (plan: PlanKey) => {
     setCheckoutLoading(plan);
@@ -701,7 +821,12 @@ export default function ChatScreen() {
                             <Text style={s.replyQuoteText} numberOfLines={2}>{replyMsg.content}</Text>
                           </View>
                         )}
-                        <Text style={s.msgTextUser}>{msg.content}</Text>
+                        {msg.imageUri && (
+                          <Image source={{ uri: msg.imageUri }} style={s.msgImage} resizeMode="cover" />
+                        )}
+                        {msg.content !== '📷 Image' && (
+                          <Text style={s.msgTextUser}>{msg.content}</Text>
+                        )}
                       </LinearGradient>
                     </TouchableOpacity>
                   </Animated.View>
@@ -736,6 +861,9 @@ export default function ChatScreen() {
                         <MarkdownText text={msg.content} style={s.msgTextAgent} />
                       </TouchableOpacity>
                     )}
+                    {msg.images && msg.images.length > 0 && (
+                      <ImageGallery images={msg.images} />
+                    )}
                   </Animated.View>
                 </SwipeableMessage>
               );
@@ -766,31 +894,27 @@ export default function ChatScreen() {
 
         {/* ── Input area ── */}
         <View style={[s.inputWrap, { paddingBottom: 20 }]}>
-          <View style={s.modeRow}>
-            <TouchableOpacity
-              style={[s.modeSeg, mode === 'teach' && s.modeSegTeach]}
-              onPress={() => { setMode('teach'); setManualMode(true); }}
-              activeOpacity={0.7}
-            >
-              <View style={[s.modeDot, { backgroundColor: T.teach, opacity: mode === 'teach' ? 1 : 0.3 }]} />
-              <Text style={[s.modeSegText, mode === 'teach' && { color: T.teach }]}>TEACH</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.modeSeg, mode === 'ask' && s.modeSegAsk]}
-              onPress={() => { setMode('ask'); setManualMode(true); }}
-              activeOpacity={0.7}
-            >
-              <View style={[s.modeDot, { backgroundColor: T.ask, opacity: mode === 'ask' ? 1 : 0.3 }]} />
-              <Text style={[s.modeSegText, mode === 'ask' && { color: T.ask }]}>ASK</Text>
-            </TouchableOpacity>
-          </View>
-
+          {pendingImage && (
+            <View style={s.imagePreviewWrap}>
+              <Image source={{ uri: pendingImage.uri }} style={s.imagePreview} resizeMode="cover" />
+              <TouchableOpacity
+                style={s.imagePreviewRemove}
+                onPress={() => setPendingImage(null)}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Feather name="x" size={12} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
           <View style={s.inputRow}>
+            <TouchableOpacity onPress={pickImage} style={s.imageBtn} activeOpacity={0.7}>
+              <Feather name="image" size={20} color={pendingImage ? T.ask : T.muted} />
+            </TouchableOpacity>
             <TextInput
               style={s.input}
               value={input}
               onChangeText={setInput}
-              placeholder={mode === 'teach' ? 'Share something...' : 'Ask anything...'}
+              placeholder={pendingImage ? 'Add a caption...' : mode === 'teach' ? 'Share something...' : 'Ask anything...'}
               placeholderTextColor={T.faint}
               multiline
               maxLength={2000}
@@ -798,9 +922,9 @@ export default function ChatScreen() {
             />
             <TouchableOpacity
               onPress={send}
-              disabled={!input.trim() || sending}
+              disabled={(!input.trim() && !pendingImage) || sending}
               activeOpacity={0.8}
-              style={[s.sendOuter, (!input.trim() || sending) && { opacity: 0.35 }]}
+              style={[s.sendOuter, ((!input.trim() && !pendingImage) || sending) && { opacity: 0.35 }]}
             >
               <LinearGradient
                 colors={GRAD_SEND}
@@ -901,21 +1025,20 @@ const s = StyleSheet.create({
   replyBannerTo: { color: T.ask, fontSize: 11, fontWeight: '700', marginBottom: 2 },
   replyBannerMsg: { color: T.muted, fontSize: 12, lineHeight: 16 },
 
+  msgImage: { width: '100%', height: 180, borderRadius: 12, marginBottom: 6 },
+
   inputWrap: {
     paddingHorizontal: 14, paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth, borderColor: T.border,
-    gap: 6,
   },
-  modeRow: { flexDirection: 'row', gap: 8 },
-  modeSeg: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 12, paddingVertical: 5,
-    borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: T.border,
+  imagePreviewWrap: { marginBottom: 8, alignSelf: 'flex-start' },
+  imagePreview: { width: 72, height: 72, borderRadius: 12 },
+  imagePreviewRemove: {
+    position: 'absolute', top: -6, right: -6,
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center',
   },
-  modeSegTeach: { borderColor: 'rgba(52,199,89,0.35)', backgroundColor: 'rgba(52,199,89,0.07)' },
-  modeSegAsk: { borderColor: 'rgba(29,155,240,0.35)', backgroundColor: 'rgba(29,155,240,0.07)' },
-  modeDot: { width: 6, height: 6, borderRadius: 3 },
-  modeSegText: { color: T.muted, fontSize: 11, fontWeight: '700', letterSpacing: 0.8 },
+  imageBtn: { paddingBottom: 11, paddingRight: 2 },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   input: {
     flex: 1, backgroundColor: '#0E0E0E', borderRadius: 22,
