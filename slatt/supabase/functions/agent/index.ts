@@ -129,17 +129,15 @@ function isTrustedURL(url: string): { trusted: boolean; domain: string | null } 
   return { trusted: !!matched, domain: hostname };
 }
 
-// ── AI evaluator ──────────────────────────────────────────────────────────────
+// ── Evaluate + natural acknowledgment in one shot ────────────────────────────
 
-async function evaluateTeaching(
+async function evaluateAndRespond(
   anthropicKey: string,
   teaching: string,
   urlsFound: string[],
   hasTrustedUrl: boolean,
-): Promise<{ verdict: EvalVerdict; reason?: string; isAnecdotal?: boolean }> {
-  const urlContext = urlsFound.length > 0
-    ? `The contributor included ${urlsFound.length} URL(s): ${urlsFound.slice(0, 3).join(', ')}. Trusted source: ${hasTrustedUrl ? 'YES' : 'NO'}.`
-    : 'No URLs provided.';
+): Promise<{ verdict: EvalVerdict; isAnecdotal?: boolean; response: string }> {
+  const urlContext = hasTrustedUrl ? 'Trusted source URL included.' : urlsFound.length > 0 ? 'URL included, not from a trusted domain.' : '';
 
   try {
     const res = await withTimeout(
@@ -152,63 +150,46 @@ async function evaluateTeaching(
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 120,
-          system: `You are a quality gate for a shared knowledge base. Evaluate whether the teaching should be accepted, flagged, or rejected.
+          max_tokens: 200,
+          system: `You are slatt. Two jobs: classify the teaching, then reply naturally.
 
-── ACCEPT:ANECDOTAL — personal experience, file as anecdotal ──
-ONLY use when the claim is DIRECTLY from the contributor's own life or their close contacts:
-• First-person accounts using "I", "my", "me" ("I tried X and got Y", "in my experience...", "I noticed...")
-• Explicit second-hand personal accounts ("my friend told me...", "a colleague of mine did X...")
-DO NOT use for third-person claims about public figures, events, history, or things the contributor is describing from the outside. Those are NEEDS_EVIDENCE or ACCEPT depending on the stakes.
+OUTPUT — two lines, nothing else:
+VERDICT: ACCEPT | ACCEPT:ANECDOTAL | NEEDS_EVIDENCE | REJECT
+[Your reply]
 
-── ACCEPT — accept as general knowledge ──
-• Words, slang, phrases, translations, transliterations in any language
-• Cultural knowledge: customs, idioms, greetings, traditions, proverbs
-• Widely accepted how-to knowledge or strategies not framed as personal experience
-• Anything low-stakes and factual
-
-── NEEDS_EVIDENCE — ask for source or clarification ──
-Only when the claim is stated as objective fact AND is potentially harmful if wrong:
-• Health or medical claims ("X cures Y")
-• Legal claims about what is or isn't legal
-• Financial claims that could mislead ("this always returns X%")
-• Verifiable factual claims you're uncertain about
-• Large statistics stated as fact with no source
-
-── REJECT — outright false or harmful ──
-Only when you are CONFIDENT it is wrong or dangerous:
-• Factually wrong per your training (wrong facts about public figures, history, science)
-• Active dangerous misinformation
-• Pure nonsense
-
-Default to ACCEPT or ACCEPT:ANECDOTAL. Most things pass.
+VERDICT rules (default to ACCEPT):
+ACCEPT:ANECDOTAL = direct first-person account (I/my/me/my friend did/tried/noticed)
+ACCEPT = facts, tips, how-to, culture, general knowledge
+NEEDS_EVIDENCE = medical/legal/financial claim that could harm if wrong; suspicious stat as absolute fact
+REJECT = you are CERTAIN it is factually wrong or dangerous
 ${urlContext}
 
-Reply with EXACTLY one of:
-ACCEPT
-ACCEPT:ANECDOTAL
-NEEDS_EVIDENCE
-REJECT: [one sentence]`,
-          messages: [{ role: 'user', content: `Teaching to evaluate:\n"${teaching}"` }],
+REPLY rules — sound like a smart curious friend, NOT a database:
+ACCEPT/ANECDOTAL: 1-2 sentences. Genuine reaction. Optional follow-up question if it flows. Never say "filed", "stored", "logged", "noted", "collective", "I'll remember".
+NEEDS_EVIDENCE: Ask for a source or more context, casually, 1 sentence.
+REJECT: Say why briefly, 1 sentence.`,
+          messages: [{ role: 'user', content: teaching }],
         }),
       }),
-      12000,
+      13000,
     );
 
-    if (!res.ok) return { verdict: 'ACCEPT' };
+    if (!res.ok) return { verdict: 'ACCEPT', response: 'Interesting.' };
 
     const data = await res.json();
     const text: string = (data.content?.[0]?.text ?? '').trim();
+    const lines = text.split('\n').map((l: string) => l.trim()).filter(Boolean);
 
-    if (text.startsWith('ACCEPT:ANECDOTAL')) return { verdict: 'ACCEPT', isAnecdotal: true };
-    if (text.startsWith('NEEDS_EVIDENCE')) return { verdict: 'NEEDS_EVIDENCE' };
-    if (text.startsWith('REJECT')) {
-      const reason = text.replace(/^REJECT:?\s*/i, '').trim() || 'Not credible enough for the collective.';
-      return { verdict: 'REJECT', reason };
-    }
-    return { verdict: 'ACCEPT' };
+    const verdictLine = lines.find((l: string) => l.startsWith('VERDICT:')) ?? '';
+    const verdictRaw = verdictLine.replace('VERDICT:', '').trim().toUpperCase();
+    const response = lines.filter((l: string) => !l.startsWith('VERDICT:')).join(' ').trim() || 'Interesting.';
+
+    if (verdictRaw.startsWith('ACCEPT:ANECDOTAL')) return { verdict: 'ACCEPT', isAnecdotal: true, response };
+    if (verdictRaw.startsWith('NEEDS_EVIDENCE')) return { verdict: 'NEEDS_EVIDENCE', response };
+    if (verdictRaw.startsWith('REJECT')) return { verdict: 'REJECT', response };
+    return { verdict: 'ACCEPT', response };
   } catch {
-    return { verdict: 'ACCEPT' };
+    return { verdict: 'ACCEPT', response: 'Cool.' };
   }
 }
 
@@ -266,44 +247,14 @@ function detectFollowUpContext(history: HistoryMessage[]): { isPending: boolean;
   return { isPending: true, originalClaim: originalMsg.content };
 }
 
-function acknowledgeAnecdotal(text: string): string {
-  const clip = text.length > 110 ? text.slice(0, 107) + '...' : text;
-  const picks = [
-    `Personal experience logged.\n\n"${clip}"\n\nFiled as anecdotal. When it comes up, I'll give it full context and my honest take.`,
-    `Got it — personal account.\n\n"${clip}"\n\nStored as anecdotal. Anyone who asks will get this plus a real analysis of it.`,
-    `Noted as lived experience.\n\n"${clip}"\n\nFiled. I'll always be upfront that it's one person's story and give the pros, cons, and what I actually think.`,
-  ];
-  return picks[text.length % picks.length];
-}
-
-function acknowledge(text: string, created: number, trustedDomain?: string | null): string {
-  const clip = text.length > 110 ? text.slice(0, 107) + '...' : text;
-  const sourceNote = trustedDomain ? ` Verified source on record: ${trustedDomain}.` : '';
-
-  if (created >= 5) {
-    return `Premium intel.\n\n"${clip}"\n\nThat's the kind of depth that makes the collective worth something. You just earned credits back.${sourceNote}`;
-  }
-  if (created >= 3) {
-    return `Solid signal.\n\n"${clip}"\n\nLive in the collective now. Good enough to teach for free.${sourceNote}`;
-  }
-  const picks = [
-    `Locked in.\n\n"${clip}"\n\nThe collective just got sharper.${sourceNote}`,
-    `Heard that.\n\n"${clip}"\n\nFiled.${sourceNote}`,
-    `That's real.\n\n"${clip}"\n\nSaved for the collective.${sourceNote}`,
-    `Good signal.\n\n"${clip}"\n\nLive in the collective now.${sourceNote}`,
-    `Solid.\n\n"${clip}"\n\nThe collective sees it.${sourceNote}`,
-  ];
-  return picks[text.length % picks.length];
-}
-
-// ── Image analysis (NSFW check + description) ─────────────────────────────────
+// ── Image analysis (NSFW check + description + ack) ──────────────────────────
 
 async function analyzeImage(
   anthropicKey: string,
   imageBase64: string,
   mimeType: string,
   userCaption: string,
-): Promise<{ safe: boolean; reason?: string; description?: string }> {
+): Promise<{ safe: boolean; description: string; ack: string }> {
   try {
     const res = await withTimeout(
       fetch('https://api.anthropic.com/v1/messages', {
@@ -315,16 +266,17 @@ async function analyzeImage(
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 400,
+          max_tokens: 300,
           messages: [{
             role: 'user',
             content: [
               { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } },
               {
                 type: 'text',
-                text: `Analyze this image. Respond in EXACTLY this format (two lines, no extra text):
+                text: `Analyze this image. Reply in EXACTLY this format (three lines, nothing else):
 SAFE: YES or NO (NO if: nudity, sexual content, graphic violence, gore, or identifiable private individuals who are not widely known public figures)
-DESCRIPTION: [concise 1-3 sentence description of what's shown${userCaption ? `, considering the user's context: "${userCaption}"` : ''}]`,
+DESCRIPTION: [concise 1-2 sentence factual description${userCaption ? `, informed by context: "${userCaption}"` : ''}]
+ACK: [1-2 sentence natural reaction as a curious friend seeing this — what stands out, maybe one question. No "filed", "stored", "collective".]`,
               },
             ],
           }],
@@ -332,16 +284,19 @@ DESCRIPTION: [concise 1-3 sentence description of what's shown${userCaption ? `,
       }),
       15000,
     );
-    if (!res.ok) return { safe: true, description: userCaption || 'Image' };
+    if (!res.ok) return { safe: true, description: userCaption || 'Image', ack: 'Nice.' };
     const data = await res.json();
     const text: string = data.content?.[0]?.text ?? '';
     const safeMatch = text.match(/SAFE:\s*(YES|NO)/i);
     const descMatch = text.match(/DESCRIPTION:\s*(.+)/i);
-    const safe = safeMatch ? safeMatch[1].toUpperCase() === 'YES' : true;
-    const description = descMatch ? descMatch[1].trim() : (userCaption || 'Image');
-    return { safe, description };
+    const ackMatch = text.match(/ACK:\s*(.+)/i);
+    return {
+      safe: safeMatch ? safeMatch[1].toUpperCase() === 'YES' : true,
+      description: descMatch ? descMatch[1].trim() : (userCaption || 'Image'),
+      ack: ackMatch ? ackMatch[1].trim() : 'Nice visual.',
+    };
   } catch {
-    return { safe: true, description: userCaption || 'Image' };
+    return { safe: true, description: userCaption || 'Image', ack: 'Nice.' };
   }
 }
 
@@ -465,14 +420,12 @@ Deno.serve(async (req) => {
             const result = await withTimeout(agent.ingest(ingestText), 25000);
             const created = result?.created ?? 0;
             body = {
-              message: created > 0
-                ? `Locked in.\n\n"${description.length > 110 ? description.slice(0, 107) + '...' : description}"\n\nImage filed in the collective.`
-                : "Image saved but the description was too vague to index well. Add more context next time.",
+              message: created > 0 ? analysis.ack : "Good image — add a bit more context next time so I can index it properly.",
               created,
               imageUrl: publicUrl,
             };
           } catch (agentErr) {
-            body = { message: `Image saved but couldn't index it: ${(agentErr as Error).message}`, imageUrl: publicUrl, created: 1 };
+            body = { message: analysis.ack, imageUrl: publicUrl, created: 1 };
           }
         }
       }
@@ -541,10 +494,10 @@ Deno.serve(async (req) => {
               const created = result?.created ?? 0;
 
               if (created === 0) {
-                body = { message: "Got the context but the original claim was too vague to file anything useful. Resubmit with more specifics.", created: 0 };
+                body = { message: "Context received but the original claim was too vague to index. Try rephrasing with more specifics.", created: 0 };
               } else {
                 body = {
-                  message: `Verified and filed.\n\n"${originalClaim.length > 100 ? originalClaim.slice(0, 97) + '...' : originalClaim}"\n\nEvidence on record${trustedDomain ? ` (${trustedDomain})` : ''}. Anyone who asks gets the full picture.`,
+                  message: hasTrustedUrl ? `Solid — source checks out${trustedDomain ? ` (${trustedDomain})` : ''}.` : "Got the context, makes sense.",
                   created,
                   trustedSource: hasTrustedUrl,
                 };
@@ -567,40 +520,33 @@ Deno.serve(async (req) => {
           isSkipped = true;
           body = { message: check.reason ?? "That's more of a chat message — switch to Ask and I'll respond.", skipped: true };
         } else {
-          // Step 2: AI evaluation
-          if (ANTHROPIC_API_KEY) {
-            const evaluation = await evaluateTeaching(ANTHROPIC_API_KEY, message, urls, hasTrustedUrl);
+          // Step 2: AI evaluation + natural acknowledgment (single call)
+          const evaluation = ANTHROPIC_API_KEY
+            ? await evaluateAndRespond(ANTHROPIC_API_KEY, message, urls, hasTrustedUrl)
+            : { verdict: 'ACCEPT' as EvalVerdict, response: 'Cool.' };
 
-            if (evaluation.verdict === 'REJECT') {
-              isSkipped = true;
-              body = { message: `That one's not quite right for the collective — ${evaluation.reason}`, skipped: true };
-            } else if (evaluation.verdict === 'NEEDS_EVIDENCE') {
-              isSkipped = true;
-              body = {
-                message: "Quick thing — is this connected to a specific company or something you've come across broadly? A link helps it stick in the collective, but if you don't have one it's all good, just let me know.",
-                skipped: true,
-              };
-            } else if (evaluation.isAnecdotal) {
-              // Anecdotal — accept directly, tag it, no questions asked
-              const anecdotalText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${message}`;
-              try {
-                const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-                await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
-                const result = await withTimeout(agent.ingest(stampDate(anecdotalText)), 25000);
-                const created = result?.created ?? 0;
-
-                if (created === 0) {
-                  body = { message: "Appreciate it — add a bit more detail and I can file it properly.", created: 0 };
-                } else {
-                  body = { message: acknowledgeAnecdotal(message), created };
-                }
-              } catch (agentErr) {
-                return new Response(
-                  JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
-                  { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
-                );
-              }
+          if (evaluation.verdict === 'REJECT') {
+            isSkipped = true;
+            body = { message: evaluation.response, skipped: true };
+          } else if (evaluation.verdict === 'NEEDS_EVIDENCE') {
+            isSkipped = true;
+            body = { message: evaluation.response, skipped: true };
+          } else if (evaluation.isAnecdotal) {
+            // Anecdotal — tag it and ingest
+            const anecdotalText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${message}`;
+            try {
+              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
+              const result = await withTimeout(agent.ingest(stampDate(anecdotalText)), 25000);
+              const created = result?.created ?? 0;
+              body = { message: created > 0 ? evaluation.response : "Add a bit more detail and I can work with it.", created };
+            } catch (agentErr) {
+              return new Response(
+                JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
+                { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
+              );
             }
+            isSkipped = true; // don't fall through to standard ingest
           }
 
           // Step 3: ingest if passed all gates
@@ -616,16 +562,9 @@ Deno.serve(async (req) => {
               const created = result?.created ?? 0;
 
               if (created === 0) {
-                body = {
-                  message: "Couldn't pull anything structured out of that — too vague. Concrete outcome, real numbers, specific situation.",
-                  created: 0,
-                };
+                body = { message: "Couldn't pull anything structured out of that — be more specific.", created: 0 };
               } else {
-                body = {
-                  message: acknowledge(message, created, trustedDomain),
-                  created,
-                  trustedSource: hasTrustedUrl,
-                };
+                body = { message: evaluation.response, created, trustedSource: hasTrustedUrl };
               }
             } catch (agentErr) {
               return new Response(
