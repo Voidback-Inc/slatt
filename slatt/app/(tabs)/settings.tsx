@@ -14,7 +14,7 @@ import { useProfile } from '@/lib/useProfile';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
 import { t, LANGUAGES } from '@/lib/i18n';
 import { useLanguage } from '@/lib/useLanguage';
-import Logo from '@/assets/images/icon.png';
+const Logo = require('@/assets/images/icon.png');
 
 const T = {
   bg: '#000',
@@ -153,7 +153,7 @@ export default function SettingsScreen() {
       const biometric = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Confirm identity to delete account',
         disableDeviceFallback: false,
-        cancelLabel: 'Cancel',
+        cancelLabel: t('cancel'),
       });
       if (!biometric.success) {
         const errorCode = (biometric as any).error as string | undefined;
@@ -184,8 +184,8 @@ export default function SettingsScreen() {
         ? 'Your subscription will be cancelled immediately. No refund will be issued.\n\nAll your data will be permanently deleted. This cannot be undone.'
         : 'All your data will be permanently deleted. This cannot be undone.',
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Continue', style: 'destructive', onPress: () => { void runDeleteFlow(); } },
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('continue'), style: 'destructive', onPress: () => { void runDeleteFlow(); } },
       ],
     );
   };
@@ -273,7 +273,7 @@ export default function SettingsScreen() {
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) { Alert.alert('Error', error.message); return; }
       setChangePwStep(null);
-      Alert.alert('Done', 'Password updated successfully.');
+      Alert.alert(t('done'), 'Password updated successfully.');
     } finally {
       setChangePwLoading(false);
     }
