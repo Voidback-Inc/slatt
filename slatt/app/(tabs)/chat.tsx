@@ -208,13 +208,15 @@ const ImageGallery = memo(function ImageGallery({
           <Text style={ig.swipeText}>swipe for more</Text>
         </View>
       )}
+      {/* Explicit-height wrapper prevents the horizontal ScrollView from expanding infinitely inside a vertical ScrollView */}
+      <View style={{ height: 228 }}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         decelerationRate="fast"
         snapToInterval={CARD_W + 10}
         snapToAlignment="start"
-        style={{ height: 240 }}
+        style={{ flex: 1 }}
         contentContainerStyle={{ paddingRight: 16, gap: 10 }}
         onScroll={e => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / (CARD_W + 10));
@@ -245,6 +247,7 @@ const ImageGallery = memo(function ImageGallery({
           </TouchableOpacity>
         ))}
       </ScrollView>
+      </View>
       {images.length > 1 && (
         <View style={ig.dots}>
           {images.map((_, i) => (
@@ -281,7 +284,7 @@ const ig = StyleSheet.create({
     backgroundColor: '#111',
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
   },
-  img: { width: '100%', height: 180 },
+  img: { width: '100%', height: 168 },
   saveBtn: {
     position: 'absolute', top: 10, right: 10,
     width: 32, height: 32, borderRadius: 16,
