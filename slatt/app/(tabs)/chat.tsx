@@ -756,9 +756,11 @@ export default function ChatScreen() {
       try { json = await res.json(); } catch { }
       if (!res.ok) throw new Error(json.error ?? json.message ?? `Server error ${res.status}`);
 
-      const content = mode === 'teach'
+      const rawContent = mode === 'teach'
         ? (json.message ?? 'Got it, teaching the collective.')
         : (json.response ?? '...');
+      // Safety net: strip any [IMAGE: ...] tags that leaked through from the edge function
+      const content = rawContent.replace(/\[(?:IMAGE|image|Image):\s*[^\]]*\]/g, '').replace(/\n{3,}/g, '\n\n').trim() || '...';
 
       const agentMsg: Message = {
         id: `a-${Date.now()}`,

@@ -79,7 +79,7 @@ Visuals keep the experience alive — always look for image tags in the knowledg
 Rules:
 - Format must be exactly: [IMAGE: https://...] — capital IMAGE, colon, space, full URL, closing bracket. No markdown, no quotes, no line breaks inside the tag.
 - Max 2 images per response. Pick the most relevant ones, not all of them.
-- Place each image tag at the end of the paragraph it illustrates.
+- Place ALL image tags at the very end of your response, after all your text — never in the middle of a paragraph.
 - If the knowledge has no images, don't fabricate URLs — just answer in text.
 - For funny/meme moments: one well-placed image lands harder than a dump.
 Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 💀 or 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
@@ -470,7 +470,7 @@ Deno.serve(async (req) => {
           const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
           await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
           const result = await withTimeout(agent.chat(message, history), 25000);
-          body = { message: result.response };
+          body = { message: typeof result?.response === 'string' ? result.response : String(result?.response ?? '...') };
         } catch {
           body = { message: "lol got you.", skipped: true };
         }
@@ -504,7 +504,7 @@ Deno.serve(async (req) => {
             const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
             await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
             const result = await withTimeout(agent.chat(message, history), 25000);
-            body = { message: result.response };
+            body = { message: typeof result?.response === 'string' ? result.response : String(result?.response ?? '...') };
           } catch {
             body = { message: "all good, no worries.", skipped: true };
           }
@@ -560,7 +560,7 @@ Deno.serve(async (req) => {
               const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
               await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
               const result = await withTimeout(agent.chat(message, history), 25000);
-              body = { message: result.response };
+              body = { message: typeof result?.response === 'string' ? result.response : String(result?.response ?? '...') };
             } catch {
               body = { message: evaluation.response, skipped: true };
             }
@@ -679,18 +679,25 @@ Deno.serve(async (req) => {
               : Promise.resolve(),
           ]);
 
+          // Guard: SDK may return response as object or undefined
+          const rawResponse: string = typeof chatResult?.response === 'string'
+            ? chatResult.response
+            : (chatResult?.response != null ? String(chatResult.response) : '');
+
           // Extract image URLs — two passes:
-          // 1. Any [...] bracket that contains a Supabase storage URL, regardless of how the agent formatted the tag
+          // 1. Any [...] bracket containing a Supabase storage URL
           // 2. Bare storage URLs that leaked through without brackets
           const storageUrlPattern = `https?://[a-z0-9]+\\.supabase\\.co/storage/v1/object/public/images/[^\\s\\])"'<>]+`;
           const bracketedImageRegex = new RegExp(`\\[[^\\]]*?(${storageUrlPattern})[^\\]]*?\\]`, 'gi');
           const bareStorageRegex = new RegExp(storageUrlPattern, 'gi');
           const inlineUrls: string[] = [];
 
-          let cleanResponse = chatResult.response
+          let cleanResponse = rawResponse
             .replace(bracketedImageRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; });
           cleanResponse = cleanResponse
             .replace(bareStorageRegex, (url: string) => { inlineUrls.push(url.trim()); return ''; })
+            // Final safety: catch any remaining [IMAGE: ...] / [image: ...] patterns in any format
+            .replace(/\[(?:IMAGE|image|Image):\s*[^\]]*\]/g, '')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
 
@@ -712,7 +719,7 @@ Deno.serve(async (req) => {
             // Fallback: agent may have stripped the [IMAGE: url] tag internally.
             // Search collective_images by description relevance using the entities
             // the agent actually discussed, then fall back to significant words in the message.
-            const entities: string[] = chatResult.relevant_entities ?? [];
+            const entities: string[] = Array.isArray(chatResult?.relevant_entities) ? chatResult.relevant_entities : [];
             const searchTerms = (entities.length > 0
               ? entities.slice(0, 3)
               : message.split(/\s+/).filter((w: string) => w.length > 4).slice(0, 3)
