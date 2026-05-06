@@ -239,6 +239,39 @@ function isConversational(text: string, history: HistoryMessage[]): boolean {
   return false;
 }
 
+// Use Claude to intelligently extract English image-search keywords from any message/language.
+// Runs in parallel with the main chat call — adds zero latency.
+async function extractImageSearchTerms(anthropicKey: string, message: string): Promise<string[]> {
+  try {
+    const res = await withTimeout(
+      fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 25,
+          messages: [{
+            role: 'user',
+            content: `Message: "${message}"\n\nExtract 1-3 specific English keywords for an image search (proper nouns, objects, brands, people, places). Normalize to English if the message is in another language. Reply with comma-separated lowercase keywords only, or NONE if there is nothing visual/specific to search for.`,
+          }],
+        }),
+      }),
+      4000,
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const text = (data.content?.[0]?.text ?? '').trim();
+    if (!text || text.toUpperCase() === 'NONE') return [];
+    return text.split(',').map((t: string) => t.trim().toLowerCase()).filter((t: string) => t.length >= 3).slice(0, 3);
+  } catch {
+    return [];
+  }
+}
+
 // Returns true if the message sounds like the user confirming personal/anecdotal experience
 function isAnecdotalConfirmation(text: string): boolean {
   const t = text.trim().toLowerCase();
@@ -665,12 +698,15 @@ Deno.serve(async (req) => {
             ? stampDate(`[IMAGE: ${learnedImageUrl}]\n\n${learnedImageDescription}${message ? `\n\nContributor context: ${message}` : ''}`)
             : '';
 
-          // Chat + ingest run in parallel — answer the question and learn the image at the same time
-          const [chatResult] = await Promise.all([
+          // Chat + ingest + image-term extraction all run in parallel
+          const [chatResult, , smartTerms] = await Promise.all([
             withTimeout(chatAgent.chat(chatMessage, history), 25000),
             ingestAgent && ingestText
               ? withTimeout(ingestAgent.ingest(ingestText), 25000).catch(() => {})
               : Promise.resolve(),
+            ANTHROPIC_API_KEY
+              ? extractImageSearchTerms(ANTHROPIC_API_KEY, typeof message === 'string' ? message : chatMessage)
+              : Promise.resolve([] as string[]),
           ]);
 
           // Guard: SDK may return response as object or undefined
@@ -714,27 +750,13 @@ Deno.serve(async (req) => {
               allImages = cappedUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
             }
 
-            // Priority 2: description search combining relevant_entities + significant message words.
-            // Using both gives two chances to match when one source doesn't have the right terms.
+            // Priority 2: description search using Claude-extracted terms (bilingual, intelligent).
+            // smartTerms comes from a parallel Claude Haiku call that normalizes any language to English keywords.
             if (!allImages.length) {
-              const STOP = new Set(['show', 'tell', 'give', 'find', 'look', 'make', 'take', 'send', 'need', 'know', 'like', 'have', 'also', 'just', 'does', 'more', 'some', 'here', 'this', 'that', 'with', 'from', 'what', 'about', 'image', 'photo', 'picture', 'visual', 'collective', 'slatt', 'there', 'them', 'they', 'your', 'their']);
-
-              const rawEntities = Array.isArray(chatResult?.relevant_entities) ? chatResult.relevant_entities : [];
-              const entityTerms: string[] = rawEntities
-                .filter((e: any) => e != null)
-                .map((e: any) => (typeof e === 'string' ? e : typeof e === 'object' ? String(e.name ?? e.value ?? '') : String(e)))
-                .filter((e: string) => e.length >= 4 && !STOP.has(e.toLowerCase()));
-
-              const msgTerms: string[] = (typeof message === 'string' ? message : '')
-                .split(/\s+/)
-                .filter((w: string) => w.length >= 4 && !STOP.has(w.toLowerCase()));
-
-              // Union of both, deduplicated, capped at 4
-              const seen = new Set<string>();
-              const searchTerms = [...entityTerms, ...msgTerms]
-                .map((t: string) => t.replace(/[%_\\]/g, '').toLowerCase())
-                .filter((t: string) => { if (!t || seen.has(t)) return false; seen.add(t); return true; })
-                .slice(0, 4);
+              const searchTerms = (smartTerms as string[])
+                .map((t: string) => t.replace(/[%_\\]/g, ''))
+                .filter(Boolean)
+                .slice(0, 3);
 
               if (searchTerms.length > 0) {
                 const filters = searchTerms.map((t: string) => `description.ilike.%${t}%`).join(',');
