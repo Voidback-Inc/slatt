@@ -348,8 +348,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { action, message, history = [], imageBase64, imageMimeType, language } = await req.json();
-    if (!action || !message) {
+    const { action, message: rawMessage, history = [], imageBase64, imageMimeType, language } = await req.json();
+    const message: string = rawMessage || '';
+    if (!action || (!message && !imageBase64)) {
       return new Response(JSON.stringify({ error: 'Missing action or message' }), { status: 400, headers: cors });
     }
 

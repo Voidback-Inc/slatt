@@ -670,7 +670,7 @@ export default function ChatScreen() {
           },
           body: JSON.stringify({
             action: mode,
-            message: messageForAgent,
+            message: messageForAgent || (capturedImage ? '(image)' : ''),
             history,
             language: getLangName(),
             ...(capturedImage ? {
@@ -745,9 +745,13 @@ export default function ChatScreen() {
     });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
+      if (!asset.base64) {
+        Alert.alert(t('permissionNeeded'), 'Could not read image data. Try a different image.');
+        return;
+      }
       setPendingImage({
         uri: asset.uri,
-        base64: asset.base64 ?? '',
+        base64: asset.base64,
         mimeType: asset.mimeType ?? 'image/jpeg',
       });
     }
