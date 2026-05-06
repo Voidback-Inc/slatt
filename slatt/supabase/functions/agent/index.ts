@@ -197,10 +197,11 @@ REJECT: Say why briefly, 1 sentence.`,
 
 function worthStoring(text: string): { ok: boolean; reason?: string } {
   const t = text.trim();
-  if (t.length < 10) return { ok: false, reason: "That's a bit short — give me a little more to work with." };
-  if (/^(hi|hey|hello|ok|okay|yes|no|sure|thanks|thank you|lol|haha|sup|test)[\s!.?]*$/i.test(t)) {
-    return { ok: false, reason: null }; // handled as conversational
+  // Social/greeting phrases — check before length so "bonjour", "hola", etc. route to chat
+  if (/^(hi|hey|hello|bonjour|hola|ciao|hallo|salut|oi|olá|привет|مرحبا|こんにちは|안녕|你好|ok|okay|yes|no|sure|thanks|thank you|merci|gracias|danke|lol|haha|sup|test|yo|gm|gn|morning|evening)[\s!.?🙂👋]*$/i.test(t)) {
+    return { ok: false, reason: null }; // route to chat
   }
+  if (t.length < 10) return { ok: false, reason: null }; // too short — route to chat, don't lecture
   if (t.endsWith('?') && t.split(/\s+/).length < 7) {
     return { ok: false, reason: "Looks like a question — hit Ask mode and I'll answer it." };
   }
@@ -514,8 +515,21 @@ Deno.serve(async (req) => {
         // Step 1: quick pre-filter
         const check = worthStoring(message);
         if (!check.ok) {
-          isSkipped = true;
-          body = { message: check.reason ?? "That's more of a chat message — switch to Ask and I'll respond.", skipped: true };
+          if (check.reason) {
+            isSkipped = true;
+            body = { message: check.reason, skipped: true };
+          } else {
+            // Short/greeting/social — just chat naturally instead of lecturing
+            isSkipped = true;
+            try {
+              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
+              const result = await withTimeout(agent.chat(message, history), 25000);
+              body = { message: result.response };
+            } catch {
+              body = { message: "hey 👋", skipped: true };
+            }
+          }
         } else {
           // Step 2: AI evaluation + natural acknowledgment (single call)
           const evaluation = ANTHROPIC_API_KEY
