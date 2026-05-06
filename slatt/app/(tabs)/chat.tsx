@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, memo } from 'react';
+import { useState, useRef, useEffect, useCallback, memo, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, Platform, KeyboardAvoidingView, Alert,
@@ -321,6 +321,135 @@ const ig = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.2)',
   },
   viewerSaveText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+});
+
+// ── Link preview ──────────────────────────────────────────────────────────────
+
+type PreviewData = {
+  type: 'youtube' | 'spotify' | 'apple_music' | 'twitter' | 'link';
+  url: string;
+  title?: string;
+  description?: string;
+  image?: string;
+  author?: string;
+  siteName?: string;
+} | null;
+
+const previewCache = new Map<string, PreviewData>();
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
+
+function extractFirstPreviewURL(text: string): string | null {
+  const matches = text.match(URL_RE) ?? [];
+  return matches.find(u =>
+    !u.includes('supabase.co/storage') &&
+    !u.includes('supabase.co/auth') &&
+    u.startsWith('https://')
+  ) ?? null;
+}
+
+const TYPE_META: Record<string, { color: string; label: string; icon: string }> = {
+  youtube:     { color: '#FF0000', label: 'YouTube',     icon: '▶' },
+  spotify:     { color: '#1DB954', label: 'Spotify',     icon: '♫' },
+  apple_music: { color: '#FC3C44', label: 'Apple Music', icon: '♫' },
+  twitter:     { color: '#1D9BF0', label: 'X (Twitter)', icon: '𝕏' },
+  link:        { color: 'rgba(255,255,255,0.35)', label: '',   icon: '↗' },
+};
+
+function LinkPreviewCard({ url }: { url: string }) {
+  const [data, setData] = useState<PreviewData | 'loading'>(
+    previewCache.has(url) ? (previewCache.get(url) ?? null) : 'loading'
+  );
+
+  useEffect(() => {
+    if (previewCache.has(url)) return;
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) { previewCache.set(url, null); if (!cancelled) setData(null); return; }
+      fetch(`${SUPABASE_URL}/functions/v1/link-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ url }),
+      })
+        .then(r => r.json())
+        .then(d => { previewCache.set(url, d); if (!cancelled) setData(d); })
+        .catch(() => { previewCache.set(url, null); if (!cancelled) setData(null); });
+    });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  if (data === 'loading') {
+    return <View style={lpc.skeleton} />;
+  }
+  if (!data || (!data.title && !data.image)) return null;
+
+  const meta = TYPE_META[data.type] ?? TYPE_META.link;
+  const isHorizontal = data.type === 'spotify' || data.type === 'apple_music';
+  const isTwitter = data.type === 'twitter';
+
+  return (
+    <TouchableOpacity style={lpc.card} onPress={() => Linking.openURL(url)} activeOpacity={0.85}>
+      {/* Wide thumbnail (YouTube / generic with image) */}
+      {!isHorizontal && !isTwitter && data.image ? (
+        <Image source={{ uri: data.image }} style={lpc.thumbWide} resizeMode="cover" />
+      ) : null}
+
+      <View style={[lpc.body, isHorizontal && { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+        {/* Square thumbnail (Spotify / Apple Music) */}
+        {isHorizontal && data.image ? (
+          <Image source={{ uri: data.image }} style={lpc.thumbSquare} resizeMode="cover" />
+        ) : null}
+
+        <View style={{ flex: 1 }}>
+          {/* Service badge */}
+          <View style={lpc.badge}>
+            <Text style={[lpc.badgeIcon, { color: meta.color }]}>{meta.icon}</Text>
+            {meta.label ? <Text style={[lpc.badgeLabel, { color: meta.color }]}>{meta.label}</Text> : null}
+          </View>
+
+          {data.title ? (
+            <Text style={lpc.title} numberOfLines={2}>{data.title}</Text>
+          ) : null}
+
+          {data.author && !isHorizontal ? (
+            <Text style={lpc.sub} numberOfLines={1}>{data.author}</Text>
+          ) : null}
+
+          {data.description && !isHorizontal ? (
+            <Text style={lpc.desc} numberOfLines={2}>{data.description}</Text>
+          ) : null}
+
+          {data.siteName && !meta.label ? (
+            <Text style={lpc.site} numberOfLines={1}>{data.siteName}</Text>
+          ) : null}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const lpc = StyleSheet.create({
+  skeleton: {
+    height: 72, borderRadius: 16, marginTop: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    width: SCREEN_W - 32,
+  },
+  card: {
+    marginTop: 8, borderRadius: 16, overflow: 'hidden',
+    backgroundColor: '#0C0C0C',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
+    width: SCREEN_W - 32,
+  },
+  thumbWide: { width: '100%', height: 180 },
+  thumbSquare: { width: 64, height: 64, borderRadius: 10 },
+  body: { padding: 12 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5 },
+  badgeIcon: { fontSize: 11, fontWeight: '700' },
+  badgeLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  title: { color: '#fff', fontSize: 13, fontWeight: '700', lineHeight: 18, marginBottom: 3 },
+  sub: { color: 'rgba(255,255,255,0.45)', fontSize: 11, lineHeight: 16 },
+  desc: { color: 'rgba(255,255,255,0.45)', fontSize: 11, lineHeight: 16, marginTop: 2 },
+  site: { color: 'rgba(255,255,255,0.3)', fontSize: 10, marginTop: 3 },
 });
 
 function detectMode(text: string): Mode {
@@ -910,37 +1039,41 @@ export default function ChatScreen() {
           >
             {messages.map(msg => {
               const replyMsg = msg.replyToId ? messages.find(m => m.id === msg.replyToId) : undefined;
+              const previewUrl = !msg.isPending && !msg.isError ? extractFirstPreviewURL(msg.content) : null;
 
               return msg.role === 'user' ? (
-                <SwipeableMessage key={msg.id} onReply={() => setReplyTo(msg)}>
-                  <Animated.View entering={FadeInDown.duration(220)} style={s.msgUserWrap}>
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onLongPress={() => Share.share({ message: msg.content })}
-                      delayLongPress={400}
-                    >
-                      <LinearGradient
-                        colors={GRAD_USER}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={s.msgUser}
+                <View key={msg.id}>
+                  <SwipeableMessage onReply={() => setReplyTo(msg)}>
+                    <Animated.View entering={FadeInDown.duration(220)} style={s.msgUserWrap}>
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onLongPress={() => Share.share({ message: msg.content })}
+                        delayLongPress={400}
                       >
-                        {replyMsg && (
-                          <View style={s.replyQuote}>
-                            <Text style={s.replyQuoteLabel}>{replyMsg.role === 'user' ? 'You' : 'slatt'}</Text>
-                            <Text style={s.replyQuoteText} numberOfLines={2}>{replyMsg.content}</Text>
-                          </View>
-                        )}
-                        {msg.imageUri && (
-                          <Image source={{ uri: msg.imageUri }} style={s.msgImage} resizeMode="cover" />
-                        )}
-                        {msg.content !== '📷 Image' && (
-                          <Text style={s.msgTextUser}>{msg.content}</Text>
-                        )}
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </Animated.View>
-                </SwipeableMessage>
+                        <LinearGradient
+                          colors={GRAD_USER}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={s.msgUser}
+                        >
+                          {replyMsg && (
+                            <View style={s.replyQuote}>
+                              <Text style={s.replyQuoteLabel}>{replyMsg.role === 'user' ? 'You' : 'slatt'}</Text>
+                              <Text style={s.replyQuoteText} numberOfLines={2}>{replyMsg.content}</Text>
+                            </View>
+                          )}
+                          {msg.imageUri && (
+                            <Image source={{ uri: msg.imageUri }} style={s.msgImage} resizeMode="cover" />
+                          )}
+                          {msg.content !== '📷 Image' && (
+                            <Text style={s.msgTextUser}>{msg.content}</Text>
+                          )}
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  </SwipeableMessage>
+                  {previewUrl && <LinkPreviewCard url={previewUrl} />}
+                </View>
               ) : (
                 <View key={msg.id}>
                   <SwipeableMessage onReply={msg.isError ? () => {} : () => setReplyTo(msg)}>
@@ -982,6 +1115,7 @@ export default function ChatScreen() {
                   {msg.images && msg.images.length > 0 && (
                     <ImageGallery images={msg.images} />
                   )}
+                  {previewUrl && <LinkPreviewCard url={previewUrl} />}
                 </View>
               );
             })}
