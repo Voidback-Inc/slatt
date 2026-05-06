@@ -340,7 +340,7 @@ export default function SettingsScreen() {
           <TouchableOpacity style={s.infoRow} onPress={() => setShowLangModal(true)}>
             <Text style={s.infoLabel}>{t('language')}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={s.infoValue}>{LANGUAGES.find(l => l.code === lang)?.nativeName}</Text>
+              <Text style={[s.infoValue, { maxWidth: undefined }]} numberOfLines={1}>{LANGUAGES.find(l => l.code === lang)?.nativeName}</Text>
               <ChevronDown size={13} color={T.accentSub} strokeWidth={2} />
             </View>
           </TouchableOpacity>

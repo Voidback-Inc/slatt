@@ -37,7 +37,7 @@ export type Strings = {
   teachLabel: string; askLabel: string; teachExample: string; askExample: string;
   filingImage: string; holdToSave: string; saved: string; savedMsg: string;
   couldNotSave: string; permissionNeeded: string; permissionMsg: string; permissionPhotoMsg: string;
-  retry: string;
+  retry: string; maybeLater: string;
   // history
   historyTitle: string; clearAll: string; noHistoryYet: string; noHistorySub: string;
   today: string; yesterday: string; continueConversation: string; dailyLimitMsg: string;
@@ -53,6 +53,11 @@ export type Strings = {
   // auth
   emailAddress: string; password: string; signIn: string; signUp: string;
   forgotPassword: string; noAccount: string; haveAccount: string;
+  // signup
+  createAccount: string; createYourAccount: string; confirmPassword: string;
+  passwordsDontMatch: string; passwordTooShort: string; atLeast8Chars: string;
+  agreePrefix: string; agreeAnd: string;
+  strengthWeak: string; strengthFair: string; strengthGood: string; strengthStrong: string;
 };
 
 const TRANSLATIONS: Record<LangCode, Strings> = {
@@ -70,7 +75,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'Permission needed',
     permissionMsg: 'Allow photo library access in Settings to share images.',
     permissionPhotoMsg: 'Allow photo library access in Settings to save images.',
-    retry: 'Retry',
+    retry: 'Retry', maybeLater: 'Maybe later',
     historyTitle: 'History', clearAll: 'Clear all', noHistoryYet: 'No history yet',
     noHistorySub: 'Your conversations will appear here after your first chat.',
     today: 'Today', yesterday: 'Yesterday',
@@ -90,6 +95,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'Email address', password: 'Password',
     signIn: 'Sign in', signUp: 'Sign up',
     forgotPassword: 'Forgot password?', noAccount: "Don't have an account?", haveAccount: 'Already have an account?',
+    createAccount: 'Create account', createYourAccount: 'CREATE YOUR ACCOUNT',
+    confirmPassword: 'Confirm password', passwordsDontMatch: "Passwords don't match",
+    passwordTooShort: 'Password too short', atLeast8Chars: 'Use at least 8 characters.',
+    agreePrefix: 'By continuing you agree to our', agreeAnd: 'and',
+    strengthWeak: 'Weak', strengthFair: 'Fair', strengthGood: 'Good', strengthStrong: 'Strong',
   },
   es: {
     cancel: 'Cancelar', continue: 'Continuar', done: 'Listo', delete: 'Eliminar',
@@ -105,7 +115,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'Permiso necesario',
     permissionMsg: 'Permite el acceso a la biblioteca de fotos en Ajustes para compartir imágenes.',
     permissionPhotoMsg: 'Permite el acceso a la biblioteca de fotos en Ajustes para guardar imágenes.',
-    retry: 'Reintentar',
+    retry: 'Reintentar', maybeLater: 'Quizás después',
     historyTitle: 'Historial', clearAll: 'Borrar todo', noHistoryYet: 'Sin historial aún',
     noHistorySub: 'Tus conversaciones aparecerán aquí después de tu primer chat.',
     today: 'Hoy', yesterday: 'Ayer',
@@ -125,6 +135,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'Dirección de correo', password: 'Contraseña',
     signIn: 'Iniciar sesión', signUp: 'Registrarse',
     forgotPassword: '¿Olvidaste tu contraseña?', noAccount: '¿No tienes cuenta?', haveAccount: '¿Ya tienes cuenta?',
+    createAccount: 'Crear cuenta', createYourAccount: 'CREA TU CUENTA',
+    confirmPassword: 'Confirmar contraseña', passwordsDontMatch: 'Las contraseñas no coinciden',
+    passwordTooShort: 'Contraseña demasiado corta', atLeast8Chars: 'Usa al menos 8 caracteres.',
+    agreePrefix: 'Al continuar, aceptas nuestra', agreeAnd: 'y',
+    strengthWeak: 'Débil', strengthFair: 'Regular', strengthGood: 'Buena', strengthStrong: 'Fuerte',
   },
   fr: {
     cancel: 'Annuler', continue: 'Continuer', done: 'Terminé', delete: 'Supprimer',
@@ -140,7 +155,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'Permission requise',
     permissionMsg: "Autorise l'accès à la bibliothèque de photos dans Réglages pour partager des images.",
     permissionPhotoMsg: "Autorise l'accès à la bibliothèque de photos dans Réglages pour enregistrer des images.",
-    retry: 'Réessayer',
+    retry: 'Réessayer', maybeLater: 'Plus tard',
     historyTitle: 'Historique', clearAll: 'Tout effacer', noHistoryYet: "Pas encore d'historique",
     noHistorySub: 'Tes conversations apparaîtront ici après ton premier chat.',
     today: "Aujourd'hui", yesterday: 'Hier',
@@ -160,6 +175,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'Adresse e-mail', password: 'Mot de passe',
     signIn: 'Se connecter', signUp: "S'inscrire",
     forgotPassword: 'Mot de passe oublié ?', noAccount: 'Pas de compte ?', haveAccount: 'Déjà un compte ?',
+    createAccount: 'Créer un compte', createYourAccount: 'CRÉEZ VOTRE COMPTE',
+    confirmPassword: 'Confirmer le mot de passe', passwordsDontMatch: 'Les mots de passe ne correspondent pas',
+    passwordTooShort: 'Mot de passe trop court', atLeast8Chars: 'Utilisez au moins 8 caractères.',
+    agreePrefix: 'En continuant, vous acceptez notre', agreeAnd: 'et',
+    strengthWeak: 'Faible', strengthFair: 'Moyen', strengthGood: 'Bon', strengthStrong: 'Fort',
   },
   de: {
     cancel: 'Abbrechen', continue: 'Weiter', done: 'Fertig', delete: 'Löschen',
@@ -175,7 +195,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'Berechtigung erforderlich',
     permissionMsg: 'Erlaube den Zugriff auf die Fotobibliothek in den Einstellungen, um Bilder zu teilen.',
     permissionPhotoMsg: 'Erlaube den Zugriff auf die Fotobibliothek in den Einstellungen, um Bilder zu speichern.',
-    retry: 'Wiederholen',
+    retry: 'Wiederholen', maybeLater: 'Später',
     historyTitle: 'Verlauf', clearAll: 'Alles löschen', noHistoryYet: 'Noch kein Verlauf',
     noHistorySub: 'Deine Gespräche erscheinen hier nach deinem ersten Chat.',
     today: 'Heute', yesterday: 'Gestern',
@@ -195,6 +215,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'E-Mail-Adresse', password: 'Passwort',
     signIn: 'Anmelden', signUp: 'Registrieren',
     forgotPassword: 'Passwort vergessen?', noAccount: 'Noch kein Konto?', haveAccount: 'Bereits ein Konto?',
+    createAccount: 'Konto erstellen', createYourAccount: 'ERSTELLE DEIN KONTO',
+    confirmPassword: 'Passwort bestätigen', passwordsDontMatch: 'Passwörter stimmen nicht überein',
+    passwordTooShort: 'Passwort zu kurz', atLeast8Chars: 'Verwende mindestens 8 Zeichen.',
+    agreePrefix: 'Mit dem Fortfahren stimmst du zu', agreeAnd: 'und',
+    strengthWeak: 'Schwach', strengthFair: 'Mittelmäßig', strengthGood: 'Gut', strengthStrong: 'Stark',
   },
   pt: {
     cancel: 'Cancelar', continue: 'Continuar', done: 'Concluído', delete: 'Excluir',
@@ -210,7 +235,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'Permissão necessária',
     permissionMsg: 'Permita o acesso à biblioteca de fotos nas Configurações para compartilhar imagens.',
     permissionPhotoMsg: 'Permita o acesso à biblioteca de fotos nas Configurações para salvar imagens.',
-    retry: 'Tentar novamente',
+    retry: 'Tentar novamente', maybeLater: 'Talvez depois',
     historyTitle: 'Histórico', clearAll: 'Limpar tudo', noHistoryYet: 'Sem histórico ainda',
     noHistorySub: 'Suas conversas aparecerão aqui após o primeiro chat.',
     today: 'Hoje', yesterday: 'Ontem',
@@ -230,6 +255,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'Endereço de e-mail', password: 'Senha',
     signIn: 'Entrar', signUp: 'Cadastrar',
     forgotPassword: 'Esqueceu sua senha?', noAccount: 'Não tem uma conta?', haveAccount: 'Já tem uma conta?',
+    createAccount: 'Criar conta', createYourAccount: 'CRIE SUA CONTA',
+    confirmPassword: 'Confirmar senha', passwordsDontMatch: 'As senhas não coincidem',
+    passwordTooShort: 'Senha muito curta', atLeast8Chars: 'Use pelo menos 8 caracteres.',
+    agreePrefix: 'Ao continuar, você concorda com nossa', agreeAnd: 'e',
+    strengthWeak: 'Fraca', strengthFair: 'Razoável', strengthGood: 'Boa', strengthStrong: 'Forte',
   },
   it: {
     cancel: 'Annulla', continue: 'Continua', done: 'Fatto', delete: 'Elimina',
@@ -245,7 +275,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'Autorizzazione necessaria',
     permissionMsg: 'Consenti l\'accesso alla libreria foto nelle Impostazioni per condividere immagini.',
     permissionPhotoMsg: 'Consenti l\'accesso alla libreria foto nelle Impostazioni per salvare immagini.',
-    retry: 'Riprova',
+    retry: 'Riprova', maybeLater: 'Forse dopo',
     historyTitle: 'Cronologia', clearAll: 'Cancella tutto', noHistoryYet: 'Nessuna cronologia',
     noHistorySub: 'Le tue conversazioni appariranno qui dopo la prima chat.',
     today: 'Oggi', yesterday: 'Ieri',
@@ -265,6 +295,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'Indirizzo e-mail', password: 'Password',
     signIn: 'Accedi', signUp: 'Registrati',
     forgotPassword: 'Password dimenticata?', noAccount: 'Non hai un account?', haveAccount: 'Hai già un account?',
+    createAccount: 'Crea account', createYourAccount: 'CREA IL TUO ACCOUNT',
+    confirmPassword: 'Conferma password', passwordsDontMatch: 'Le password non corrispondono',
+    passwordTooShort: 'Password troppo corta', atLeast8Chars: 'Usa almeno 8 caratteri.',
+    agreePrefix: 'Continuando, accetti la nostra', agreeAnd: 'e',
+    strengthWeak: 'Debole', strengthFair: 'Discreta', strengthGood: 'Buona', strengthStrong: 'Forte',
   },
   nl: {
     cancel: 'Annuleren', continue: 'Doorgaan', done: 'Klaar', delete: 'Verwijderen',
@@ -280,7 +315,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'Toestemming vereist',
     permissionMsg: 'Sta toegang tot de fotobibliotheek toe in Instellingen om afbeeldingen te delen.',
     permissionPhotoMsg: 'Sta toegang tot de fotobibliotheek toe in Instellingen om afbeeldingen op te slaan.',
-    retry: 'Opnieuw proberen',
+    retry: 'Opnieuw proberen', maybeLater: 'Misschien later',
     historyTitle: 'Geschiedenis', clearAll: 'Alles wissen', noHistoryYet: 'Nog geen geschiedenis',
     noHistorySub: 'Je gesprekken verschijnen hier na je eerste chat.',
     today: 'Vandaag', yesterday: 'Gisteren',
@@ -300,6 +335,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'E-mailadres', password: 'Wachtwoord',
     signIn: 'Inloggen', signUp: 'Registreren',
     forgotPassword: 'Wachtwoord vergeten?', noAccount: 'Geen account?', haveAccount: 'Al een account?',
+    createAccount: 'Account aanmaken', createYourAccount: 'MAAK JE ACCOUNT AAN',
+    confirmPassword: 'Wachtwoord bevestigen', passwordsDontMatch: 'Wachtwoorden komen niet overeen',
+    passwordTooShort: 'Wachtwoord te kort', atLeast8Chars: 'Gebruik minimaal 8 tekens.',
+    agreePrefix: 'Door verder te gaan, ga je akkoord met onze', agreeAnd: 'en',
+    strengthWeak: 'Zwak', strengthFair: 'Matig', strengthGood: 'Goed', strengthStrong: 'Sterk',
   },
   ja: {
     cancel: 'キャンセル', continue: '続ける', done: '完了', delete: '削除',
@@ -315,7 +355,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: '権限が必要',
     permissionMsg: '設定でフォトライブラリへのアクセスを許可してください（画像を共有するため）。',
     permissionPhotoMsg: '設定でフォトライブラリへのアクセスを許可してください（画像を保存するため）。',
-    retry: '再試行',
+    retry: '再試行', maybeLater: 'また今度',
     historyTitle: '履歴', clearAll: 'すべてクリア', noHistoryYet: 'まだ履歴がありません',
     noHistorySub: '最初のチャット後、ここに会話が表示されます。',
     today: '今日', yesterday: '昨日',
@@ -335,6 +375,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'メールアドレス', password: 'パスワード',
     signIn: 'サインイン', signUp: 'サインアップ',
     forgotPassword: 'パスワードをお忘れですか？', noAccount: 'アカウントをお持ちでないですか？', haveAccount: 'すでにアカウントをお持ちですか？',
+    createAccount: 'アカウント作成', createYourAccount: 'アカウントを作成する',
+    confirmPassword: 'パスワードの確認', passwordsDontMatch: 'パスワードが一致しません',
+    passwordTooShort: 'パスワードが短すぎます', atLeast8Chars: '8文字以上を使用してください。',
+    agreePrefix: '続けることで、当社の', agreeAnd: 'および',
+    strengthWeak: '弱い', strengthFair: '普通', strengthGood: '良い', strengthStrong: '強い',
   },
   ko: {
     cancel: '취소', continue: '계속', done: '완료', delete: '삭제',
@@ -350,7 +395,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: '권한 필요',
     permissionMsg: '이미지를 공유하려면 설정에서 사진 라이브러리 접근을 허용하세요.',
     permissionPhotoMsg: '이미지를 저장하려면 설정에서 사진 라이브러리 접근을 허용하세요.',
-    retry: '다시 시도',
+    retry: '다시 시도', maybeLater: '나중에',
     historyTitle: '기록', clearAll: '모두 지우기', noHistoryYet: '아직 기록이 없습니다',
     noHistorySub: '첫 번째 채팅 후 여기에 대화가 표시됩니다.',
     today: '오늘', yesterday: '어제',
@@ -370,6 +415,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: '이메일 주소', password: '비밀번호',
     signIn: '로그인', signUp: '가입',
     forgotPassword: '비밀번호를 잊으셨나요?', noAccount: '계정이 없으신가요?', haveAccount: '이미 계정이 있으신가요?',
+    createAccount: '계정 만들기', createYourAccount: '계정 만들기',
+    confirmPassword: '비밀번호 확인', passwordsDontMatch: '비밀번호가 일치하지 않습니다',
+    passwordTooShort: '비밀번호가 너무 짧습니다', atLeast8Chars: '8자 이상을 사용하세요.',
+    agreePrefix: '계속하면 당사의', agreeAnd: '및',
+    strengthWeak: '약함', strengthFair: '보통', strengthGood: '좋음', strengthStrong: '강함',
   },
   zh: {
     cancel: '取消', continue: '继续', done: '完成', delete: '删除',
@@ -385,7 +435,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: '需要权限',
     permissionMsg: '在设置中允许访问照片库以共享图片。',
     permissionPhotoMsg: '在设置中允许访问照片库以保存图片。',
-    retry: '重试',
+    retry: '重试', maybeLater: '稍后再说',
     historyTitle: '历史记录', clearAll: '清除全部', noHistoryYet: '暂无历史记录',
     noHistorySub: '第一次聊天后，你的对话将显示在这里。',
     today: '今天', yesterday: '昨天',
@@ -405,6 +455,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: '电子邮件地址', password: '密码',
     signIn: '登录', signUp: '注册',
     forgotPassword: '忘记密码？', noAccount: '没有账户？', haveAccount: '已有账户？',
+    createAccount: '创建账户', createYourAccount: '创建您的账户',
+    confirmPassword: '确认密码', passwordsDontMatch: '密码不匹配',
+    passwordTooShort: '密码太短', atLeast8Chars: '请使用至少8个字符。',
+    agreePrefix: '继续即表示您同意我们的', agreeAnd: '和',
+    strengthWeak: '弱', strengthFair: '一般', strengthGood: '好', strengthStrong: '强',
   },
   ar: {
     cancel: 'إلغاء', continue: 'متابعة', done: 'تم', delete: 'حذف',
@@ -420,7 +475,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'إذن مطلوب',
     permissionMsg: 'اسمح بالوصول إلى مكتبة الصور في الإعدادات لمشاركة الصور.',
     permissionPhotoMsg: 'اسمح بالوصول إلى مكتبة الصور في الإعدادات لحفظ الصور.',
-    retry: 'إعادة المحاولة',
+    retry: 'إعادة المحاولة', maybeLater: 'ربما لاحقاً',
     historyTitle: 'السجل', clearAll: 'مسح الكل', noHistoryYet: 'لا سجل بعد',
     noHistorySub: 'ستظهر محادثاتك هنا بعد أول محادثة.',
     today: 'اليوم', yesterday: 'أمس',
@@ -440,6 +495,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'عنوان البريد الإلكتروني', password: 'كلمة المرور',
     signIn: 'تسجيل الدخول', signUp: 'إنشاء حساب',
     forgotPassword: 'نسيت كلمة المرور؟', noAccount: 'ليس لديك حساب؟', haveAccount: 'لديك حساب بالفعل؟',
+    createAccount: 'إنشاء حساب', createYourAccount: 'أنشئ حسابك',
+    confirmPassword: 'تأكيد كلمة المرور', passwordsDontMatch: 'كلمتا المرور غير متطابقتين',
+    passwordTooShort: 'كلمة المرور قصيرة جداً', atLeast8Chars: 'استخدم 8 أحرف على الأقل.',
+    agreePrefix: 'بالمتابعة، أنت توافق على', agreeAnd: 'و',
+    strengthWeak: 'ضعيف', strengthFair: 'مقبول', strengthGood: 'جيد', strengthStrong: 'قوي',
   },
   hi: {
     cancel: 'रद्द करें', continue: 'जारी रखें', done: 'हो गया', delete: 'हटाएं',
@@ -455,7 +515,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'अनुमति आवश्यक',
     permissionMsg: 'छवियाँ साझा करने के लिए सेटिंग में फ़ोटो लाइब्रेरी एक्सेस की अनुमति दें।',
     permissionPhotoMsg: 'छवियाँ सहेजने के लिए सेटिंग में फ़ोटो लाइब्रेरी एक्सेस की अनुमति दें।',
-    retry: 'पुनः प्रयास',
+    retry: 'पुनः प्रयास', maybeLater: 'शायद बाद में',
     historyTitle: 'इतिहास', clearAll: 'सब साफ़ करें', noHistoryYet: 'अभी कोई इतिहास नहीं',
     noHistorySub: 'पहली चैट के बाद आपकी बातचीत यहाँ दिखाई देगी।',
     today: 'आज', yesterday: 'कल',
@@ -475,6 +535,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'ईमेल पता', password: 'पासवर्ड',
     signIn: 'साइन इन', signUp: 'साइन अप',
     forgotPassword: 'पासवर्ड भूल गए?', noAccount: 'खाता नहीं है?', haveAccount: 'पहले से खाता है?',
+    createAccount: 'खाता बनाएं', createYourAccount: 'अपना खाता बनाएं',
+    confirmPassword: 'पासवर्ड की पुष्टि करें', passwordsDontMatch: 'पासवर्ड मेल नहीं खाते',
+    passwordTooShort: 'पासवर्ड बहुत छोटा है', atLeast8Chars: 'कम से कम 8 अक्षर उपयोग करें।',
+    agreePrefix: 'जारी रखकर आप हमारी', agreeAnd: 'और',
+    strengthWeak: 'कमज़ोर', strengthFair: 'ठीक-ठाक', strengthGood: 'अच्छा', strengthStrong: 'मज़बूत',
   },
   ru: {
     cancel: 'Отмена', continue: 'Продолжить', done: 'Готово', delete: 'Удалить',
@@ -490,7 +555,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'Требуется разрешение',
     permissionMsg: 'Разрешите доступ к фотобиблиотеке в Настройках, чтобы делиться изображениями.',
     permissionPhotoMsg: 'Разрешите доступ к фотобиблиотеке в Настройках, чтобы сохранять изображения.',
-    retry: 'Повторить',
+    retry: 'Повторить', maybeLater: 'Может быть позже',
     historyTitle: 'История', clearAll: 'Очистить всё', noHistoryYet: 'Истории пока нет',
     noHistorySub: 'Ваши разговоры появятся здесь после первого чата.',
     today: 'Сегодня', yesterday: 'Вчера',
@@ -510,6 +575,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'Адрес электронной почты', password: 'Пароль',
     signIn: 'Войти', signUp: 'Зарегистрироваться',
     forgotPassword: 'Забыли пароль?', noAccount: 'Нет аккаунта?', haveAccount: 'Уже есть аккаунт?',
+    createAccount: 'Создать аккаунт', createYourAccount: 'СОЗДАЙТЕ АККАУНТ',
+    confirmPassword: 'Подтвердить пароль', passwordsDontMatch: 'Пароли не совпадают',
+    passwordTooShort: 'Пароль слишком короткий', atLeast8Chars: 'Используйте не менее 8 символов.',
+    agreePrefix: 'Продолжая, вы соглашаетесь с нашей', agreeAnd: 'и',
+    strengthWeak: 'Слабый', strengthFair: 'Средний', strengthGood: 'Хороший', strengthStrong: 'Надёжный',
   },
   tr: {
     cancel: 'İptal', continue: 'Devam', done: 'Tamam', delete: 'Sil',
@@ -525,7 +595,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'İzin gerekli',
     permissionMsg: "Görüntüleri paylaşmak için Ayarlar'dan fotoğraf kitaplığına erişime izin verin.",
     permissionPhotoMsg: "Görüntüleri kaydetmek için Ayarlar'dan fotoğraf kitaplığına erişime izin verin.",
-    retry: 'Tekrar dene',
+    retry: 'Tekrar dene', maybeLater: 'Belki sonra',
     historyTitle: 'Geçmiş', clearAll: 'Hepsini temizle', noHistoryYet: 'Henüz geçmiş yok',
     noHistorySub: 'Sohbetleriniz ilk sohbetten sonra burada görünecek.',
     today: 'Bugün', yesterday: 'Dün',
@@ -545,6 +615,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'E-posta adresi', password: 'Şifre',
     signIn: 'Giriş yap', signUp: 'Kaydol',
     forgotPassword: 'Şifreni mi unuttun?', noAccount: 'Hesabın yok mu?', haveAccount: 'Zaten hesabın var mı?',
+    createAccount: 'Hesap oluştur', createYourAccount: 'HESABINI OLUŞTUR',
+    confirmPassword: 'Şifreyi onayla', passwordsDontMatch: 'Şifreler eşleşmiyor',
+    passwordTooShort: 'Şifre çok kısa', atLeast8Chars: 'En az 8 karakter kullanın.',
+    agreePrefix: 'Devam ederek', agreeAnd: 've',
+    strengthWeak: 'Zayıf', strengthFair: 'Orta', strengthGood: 'İyi', strengthStrong: 'Güçlü',
   },
   pl: {
     cancel: 'Anuluj', continue: 'Kontynuuj', done: 'Gotowe', delete: 'Usuń',
@@ -560,7 +635,7 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     permissionNeeded: 'Wymagane uprawnienie',
     permissionMsg: 'Zezwól na dostęp do biblioteki zdjęć w Ustawieniach, aby udostępniać obrazy.',
     permissionPhotoMsg: 'Zezwól na dostęp do biblioteki zdjęć w Ustawieniach, aby zapisywać obrazy.',
-    retry: 'Spróbuj ponownie',
+    retry: 'Spróbuj ponownie', maybeLater: 'Może później',
     historyTitle: 'Historia', clearAll: 'Wyczyść wszystko', noHistoryYet: 'Brak historii',
     noHistorySub: 'Twoje rozmowy pojawią się tutaj po pierwszym czacie.',
     today: 'Dzisiaj', yesterday: 'Wczoraj',
@@ -580,6 +655,11 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
     emailAddress: 'Adres e-mail', password: 'Hasło',
     signIn: 'Zaloguj się', signUp: 'Zarejestruj się',
     forgotPassword: 'Zapomniałeś hasła?', noAccount: 'Nie masz konta?', haveAccount: 'Masz już konto?',
+    createAccount: 'Utwórz konto', createYourAccount: 'UTWÓRZ SWOJE KONTO',
+    confirmPassword: 'Potwierdź hasło', passwordsDontMatch: 'Hasła nie są zgodne',
+    passwordTooShort: 'Hasło za krótkie', atLeast8Chars: 'Użyj co najmniej 8 znaków.',
+    agreePrefix: 'Kontynuując, wyrażasz zgodę na nasze', agreeAnd: 'i',
+    strengthWeak: 'Słabe', strengthFair: 'Umiarkowane', strengthGood: 'Dobre', strengthStrong: 'Silne',
   },
 };
 

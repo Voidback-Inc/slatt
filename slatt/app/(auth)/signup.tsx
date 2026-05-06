@@ -7,8 +7,11 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
+import { t, LANGUAGES } from '@/lib/i18n';
+import { useLanguage } from '@/lib/useLanguage';
 
 const C = {
   bg: '#000',
@@ -37,7 +40,7 @@ function PasswordStrength({ password }: { password: string }) {
     /[^A-Za-z0-9]/.test(password),
   ];
   const score = checks.filter(Boolean).length;
-  const labels = ['Weak', 'Fair', 'Good', 'Strong'];
+  const labels = [t('strengthWeak'), t('strengthFair'), t('strengthGood'), t('strengthStrong')];
   const gradPairs: [string, string][] = [
     ['#FF453A', '#FF6B6B'],
     ['#FF9F0A', '#FFCC02'],
@@ -62,7 +65,7 @@ function PasswordStrength({ password }: { password: string }) {
           </View>
         ))}
       </View>
-      <Text style={[ps.label, { color: pair[0] }]}>{labels[score - 1] ?? 'Weak'}</Text>
+      <Text style={[ps.label, { color: pair[0] }]}>{labels[score - 1] ?? t('strengthWeak')}</Text>
     </View>
   );
 }
@@ -79,17 +82,19 @@ const ps = StyleSheet.create({
 
 export default function SignupScreen() {
   const router = useRouter();
+  const { lang, changeLang } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
   const [legalModal, setLegalModal] = useState<'terms' | 'privacy' | null>(null);
+  const [showLangModal, setShowLangModal] = useState(false);
 
   const signUp = async () => {
     if (!email.trim() || !password || !confirm) return;
-    if (password !== confirm) { Alert.alert('Passwords don\'t match'); return; }
-    if (password.length < 8) { Alert.alert('Password too short', 'Use at least 8 characters.'); return; }
+    if (password !== confirm) { Alert.alert(t('passwordsDontMatch')); return; }
+    if (password.length < 8) { Alert.alert(t('passwordTooShort'), t('atLeast8Chars')); return; }
 
     setLoading(true);
     const { error } = await supabase.auth.signUp({ email: email.trim(), password });
@@ -98,7 +103,6 @@ export default function SignupScreen() {
     if (error) {
       Alert.alert('Sign up failed', error.message);
     } else {
-      // Supabase sends a 6-digit OTP to the email — verify it in-app
       router.push({
         pathname: '/(auth)/verify',
         params: { email: email.trim(), type: 'signup' },
@@ -109,6 +113,7 @@ export default function SignupScreen() {
   const ready = !!email.trim() && !!password && !!confirm && !loading;
   const mismatch = confirm.length > 0 && password !== confirm;
   const match = !!confirm && password === confirm;
+  const currentLangLabel = LANGUAGES.find(l => l.code === lang)?.nativeName ?? 'English';
 
   return (
     <KeyboardAvoidingView
@@ -122,6 +127,13 @@ export default function SignupScreen() {
       />
 
       <SafeAreaView style={{ flex: 1 }}>
+        {/* ── Language picker button (top-right) ── */}
+        <TouchableOpacity style={s.langBtn} onPress={() => setShowLangModal(true)} activeOpacity={0.7}>
+          <Feather name="globe" size={13} color={C.muted} />
+          <Text style={s.langBtnText}>{currentLangLabel}</Text>
+          <Feather name="chevron-down" size={12} color={C.muted} />
+        </TouchableOpacity>
+
         <ScrollView
           contentContainerStyle={s.root}
           showsVerticalScrollIndicator={false}
@@ -145,7 +157,7 @@ export default function SignupScreen() {
               </View>
             </LinearGradient>
             <Text style={s.wordmark}>slatt</Text>
-            <Text style={s.tagline}>CREATE YOUR ACCOUNT</Text>
+            <Text style={s.tagline}>{t('createYourAccount')}</Text>
           </View>
 
           {/* ── Form ── */}
@@ -155,7 +167,7 @@ export default function SignupScreen() {
                 style={s.input}
                 value={email}
                 onChangeText={setEmail}
-                placeholder="Email address"
+                placeholder={t('emailAddress')}
                 placeholderTextColor={C.placeholder}
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -170,7 +182,7 @@ export default function SignupScreen() {
                 style={s.input}
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Password"
+                placeholder={t('password')}
                 placeholderTextColor={C.placeholder}
                 secureTextEntry
                 onFocus={() => setFocused('password')}
@@ -190,7 +202,7 @@ export default function SignupScreen() {
                 style={s.input}
                 value={confirm}
                 onChangeText={setConfirm}
-                placeholder="Confirm password"
+                placeholder={t('confirmPassword')}
                 placeholderTextColor={C.placeholder}
                 secureTextEntry
                 onFocus={() => setFocused('confirm')}
@@ -199,7 +211,7 @@ export default function SignupScreen() {
             </View>
 
             {mismatch && (
-              <Text style={s.errorTxt}>Passwords don't match</Text>
+              <Text style={s.errorTxt}>{t('passwordsDontMatch')}</Text>
             )}
 
             <TouchableOpacity
@@ -216,24 +228,24 @@ export default function SignupScreen() {
               >
                 {loading
                   ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={s.btnText}>Create account</Text>}
+                  : <Text style={s.btnText}>{t('createAccount')}</Text>}
               </LinearGradient>
             </TouchableOpacity>
 
             <Text style={s.legal}>
-              By continuing you agree to our{' '}
-              <Text style={s.legalLink} onPress={() => setLegalModal('terms')}>Terms of Service</Text>
-              {' '}and{' '}
-              <Text style={s.legalLink} onPress={() => setLegalModal('privacy')}>Privacy Policy</Text>.
+              {t('agreePrefix')}{' '}
+              <Text style={s.legalLink} onPress={() => setLegalModal('terms')}>{t('termsOfService')}</Text>
+              {' '}{t('agreeAnd')}{' '}
+              <Text style={s.legalLink} onPress={() => setLegalModal('privacy')}>{t('privacyPolicy')}</Text>.
             </Text>
           </View>
 
           {/* ── Footer ── */}
           <View style={s.footer}>
-            <Text style={s.footerTxt}>Already have an account?</Text>
+            <Text style={s.footerTxt}>{t('haveAccount')}</Text>
             <Link href="/(auth)/login" asChild>
               <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Text style={s.footerLink}> Sign in</Text>
+                <Text style={s.footerLink}> {t('signIn')}</Text>
               </TouchableOpacity>
             </Link>
           </View>
@@ -245,9 +257,9 @@ export default function SignupScreen() {
         <View style={s.modalOverlay}>
           <View style={s.modalCard}>
             <View style={s.modalHeader}>
-              <Text style={s.modalTitle}>{legalModal === 'terms' ? 'Terms of Service' : 'Privacy Policy'}</Text>
+              <Text style={s.modalTitle}>{legalModal === 'terms' ? t('termsOfService') : t('privacyPolicy')}</Text>
               <TouchableOpacity onPress={() => setLegalModal(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Text style={s.modalClose}>Done</Text>
+                <Text style={s.modalClose}>{t('done')}</Text>
               </TouchableOpacity>
             </View>
             <ScrollView style={s.modalScroll} showsVerticalScrollIndicator={false}>
@@ -258,15 +270,53 @@ export default function SignupScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Language picker modal */}
+      <Modal visible={showLangModal} transparent animationType="slide" onRequestClose={() => setShowLangModal(false)}>
+        <View style={lm.overlay}>
+          <View style={lm.card}>
+            <View style={lm.pill} />
+            <Text style={lm.title}>{t('selectLanguage')}</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+              {LANGUAGES.map(l => (
+                <TouchableOpacity
+                  key={l.code}
+                  style={lm.row}
+                  onPress={() => { changeLang(l.code); setShowLangModal(false); }}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={lm.native}>{l.nativeName}</Text>
+                    <Text style={lm.nameEn}>{l.name}</Text>
+                  </View>
+                  {lang === l.code && <View style={lm.check} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={lm.cancel} onPress={() => setShowLangModal(false)}>
+              <Text style={lm.cancelText}>{t('cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
 
 const s = StyleSheet.create({
   root: {
-    paddingHorizontal: 28, paddingTop: 40, paddingBottom: 40,
+    paddingHorizontal: 28, paddingTop: 60, paddingBottom: 40,
     justifyContent: 'center', flexGrow: 1,
   },
+  langBtn: {
+    position: 'absolute', top: Platform.OS === 'ios' ? 56 : 16, right: 20,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.1)',
+    zIndex: 10,
+  },
+  langBtnText: { color: C.muted, fontSize: 12, fontWeight: '500' },
   hero: { alignItems: 'center', marginBottom: 44 },
   glowBlob: {
     position: 'absolute', top: -20,
@@ -302,7 +352,6 @@ const s = StyleSheet.create({
   btnOuter: { borderRadius: 28, overflow: 'hidden', marginTop: 4 },
   btn: { height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
-  btnTextDim: { opacity: 0.3 },
   legal: {
     color: 'rgba(255,255,255,0.2)', fontSize: 11,
     textAlign: 'center', lineHeight: 16,
@@ -331,4 +380,26 @@ const s = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     paddingBottom: 40,
   },
+});
+
+const lm = StyleSheet.create({
+  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.65)' },
+  card: {
+    backgroundColor: '#0D0D0D', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 20, paddingTop: 14,
+    borderWidth: StyleSheet.hairlineWidth, borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  pill: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)', alignSelf: 'center', marginBottom: 20 },
+  title: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 16 },
+  row: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  native: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  nameEn: { color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: 1 },
+  check: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#1D9BF0' },
+  cancel: { alignItems: 'center', paddingVertical: 16, marginTop: 4 },
+  cancelText: { color: 'rgba(255,255,255,0.45)', fontSize: 14 },
 });

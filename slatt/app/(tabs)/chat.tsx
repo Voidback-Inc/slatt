@@ -444,13 +444,13 @@ function PaywallModal({
 
           <Text style={pw.legal}>
             Payment is charged to your Apple ID account at confirmation of purchase. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Manage or cancel in Settings → Apple ID → Subscriptions.{'\n'}
-            <Text style={pw.legalLink} onPress={() => setLegalModal('terms')}>Terms of Use</Text>
+            <Text style={pw.legalLink} onPress={() => setLegalModal('terms')}>{t('termsOfService')}</Text>
             {'  ·  '}
-            <Text style={pw.legalLink} onPress={() => setLegalModal('privacy')}>Privacy Policy</Text>
+            <Text style={pw.legalLink} onPress={() => setLegalModal('privacy')}>{t('privacyPolicy')}</Text>
           </Text>
 
           <TouchableOpacity style={pw.dismiss} onPress={onClose}>
-            <Text style={pw.dismissText}>Maybe later</Text>
+            <Text style={pw.dismissText}>{t('maybeLater')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -459,9 +459,9 @@ function PaywallModal({
         <View style={pw.legalOverlay}>
           <View style={pw.legalCard}>
             <View style={pw.legalHeader}>
-              <Text style={pw.legalTitle}>{legalModal === 'terms' ? 'Terms of Use' : 'Privacy Policy'}</Text>
+              <Text style={pw.legalTitle}>{legalModal === 'terms' ? t('termsOfService') : t('privacyPolicy')}</Text>
               <TouchableOpacity onPress={() => setLegalModal(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Text style={pw.legalDone}>Done</Text>
+                <Text style={pw.legalDone}>{t('done')}</Text>
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>

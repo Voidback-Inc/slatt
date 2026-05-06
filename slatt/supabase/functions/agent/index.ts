@@ -235,11 +235,8 @@ function detectFollowUpContext(history: HistoryMessage[]): { isPending: boolean;
   const reversed = [...history].reverse();
   const lastAgent = reversed.find(h => h.role === 'assistant');
   if (!lastAgent) return { isPending: false };
-  const isPendingResponse = (
-    /quick thing.*company/i.test(lastAgent.content) ||
-    /drop a link/i.test(lastAgent.content) ||
-    /still not enough.*drop an actual link/i.test(lastAgent.content)
-  );
+  // Match both old hardcoded patterns and new natural-language evidence requests
+  const isPendingResponse = /\b(source|link|url|evidence|back (that|it) up|verify|where did|do you have|can you share|any source|citation|drop a|reference)\b/i.test(lastAgent.content);
   if (!isPendingResponse) return { isPending: false };
   const agentIdx = reversed.indexOf(lastAgent);
   const originalMsg = reversed.slice(agentIdx + 1).find(h => h.role === 'user');
