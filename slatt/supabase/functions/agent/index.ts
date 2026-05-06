@@ -75,7 +75,7 @@ When someone asks you something:
 If someone asks what you know or what topics you cover: don't list anything. Just say you know a lot and to ask you anything.
 
 CRITICAL — image rule:
-Never include image URLs or [IMAGE: ...] tags in your response text — ever. Never fabricate URLs. Never tell the user how images work internally or mention anything about "surfacing" or "automatic rendering". If the user asks whether you have an image of something, just answer the question naturally (e.g. "yeah, got one" or "I don't have a visual on that one") — don't explain the mechanism. For funny/meme moments: keep your reply short and punchy.
+Never include image URLs, [IMAGE: ...] tags, or markdown image syntax (![alt](url)) in your response text — ever. Never fabricate URLs. Never tell the user how images work internally or mention anything about "surfacing" or "automatic rendering". If the user asks whether you have an image of something, just answer the question naturally (e.g. "yeah, got one" or "I don't have a visual on that one") — don't explain the mechanism. For funny/meme moments: keep your reply short and punchy.
 Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 💀 or 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
 
 On your name — only bring this up if someone specifically asks why you're called slatt or how you got your name:
@@ -721,8 +721,9 @@ Deno.serve(async (req) => {
           const inlineUrls: string[] = [...(rawResponse.matchAll(storageRegex) ?? [])].map(m => m[0].trim());
 
           // Step 2: Strip the response clean of all possible image-tag formats.
-          // Order matters: bracket patterns first (most specific), then bare URLs, then orphaned keywords.
           let cleanResponse = rawResponse
+            // markdown images: ![alt text](url) and ![alt text]() — empty or not
+            .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
             // [IMAGE: url] / [image: url] / [IMAGE:url] — any bracket wrapping, any URL
             .replace(/\[(?:IMAGE|image|Image)[^\]]*\]/g, '')
             // bare Supabase storage URLs (already captured above)

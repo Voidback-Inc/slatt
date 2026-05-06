@@ -763,7 +763,10 @@ export default function ChatScreen() {
         ? (json.message ?? 'Got it, teaching the collective.')
         : (json.response ?? '...');
       // Safety net: strip any [IMAGE: ...] tags that leaked through from the edge function
-      const content = rawContent.replace(/\[(?:IMAGE|image|Image):\s*[^\]]*\]/g, '').replace(/\n{3,}/g, '\n\n').trim() || '...';
+      const content = rawContent
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        .replace(/\[(?:IMAGE|image|Image):\s*[^\]]*\]/g, '')
+        .replace(/\n{3,}/g, '\n\n').trim() || '...';
 
       const agentMsg: Message = {
         id: `a-${Date.now()}`,
