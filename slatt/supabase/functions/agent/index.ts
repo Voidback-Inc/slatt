@@ -242,7 +242,7 @@ async function analyzeImage(
   imageBase64: string,
   mimeType: string,
   userCaption: string,
-): Promise<{ safe: boolean; description: string; ack: string }> {
+): Promise<{ safe: boolean; personal: boolean; description: string; ack: string }> {
   // Anthropic only accepts jpeg/png/gif/webp — normalize HEIC and anything else to jpeg
   const safeMime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mimeType)
     ? mimeType : 'image/jpeg';
@@ -264,8 +264,9 @@ async function analyzeImage(
               { type: 'image', source: { type: 'base64', media_type: safeMime, data: imageBase64 } },
               {
                 type: 'text',
-                text: `Analyze this image. Reply in EXACTLY this format (three lines, nothing else):
-SAFE: YES or NO (NO if: nudity, sexual content, graphic violence, gore, or identifiable private individuals who are not widely known public figures)
+                text: `Analyze this image. Reply in EXACTLY this format (four lines, nothing else):
+SAFE: YES or NO (NO if: nudity, sexual content, graphic violence, gore)
+PERSONAL: YES or NO (YES if: visible usernames/handles, notification previews, private messages, DMs, personal account screens, contact names, phone numbers, private identifying info)
 DESCRIPTION: [concise 1-2 sentence factual description${userCaption ? `, informed by context: "${userCaption}"` : ''}]
 ACK: [1-2 sentence natural reaction as a curious friend seeing this — what stands out, maybe one question. No "filed", "stored", "collective".]`,
               },
@@ -275,19 +276,21 @@ ACK: [1-2 sentence natural reaction as a curious friend seeing this — what sta
       }),
       15000,
     );
-    if (!res.ok) return { safe: true, description: userCaption || 'Image', ack: 'Nice.' };
+    if (!res.ok) return { safe: true, personal: false, description: userCaption || 'Image', ack: 'Nice.' };
     const data = await res.json();
     const text: string = data.content?.[0]?.text ?? '';
     const safeMatch = text.match(/SAFE:\s*(YES|NO)/i);
+    const personalMatch = text.match(/PERSONAL:\s*(YES|NO)/i);
     const descMatch = text.match(/DESCRIPTION:\s*(.+)/i);
     const ackMatch = text.match(/ACK:\s*(.+)/i);
     return {
       safe: safeMatch ? safeMatch[1].toUpperCase() === 'YES' : true,
+      personal: personalMatch ? personalMatch[1].toUpperCase() === 'YES' : false,
       description: descMatch ? descMatch[1].trim() : (userCaption || 'Image'),
       ack: ackMatch ? ackMatch[1].trim() : 'Nice visual.',
     };
   } catch {
-    return { safe: true, description: userCaption || 'Image', ack: 'Nice.' };
+    return { safe: true, personal: false, description: userCaption || 'Image', ack: 'Nice.' };
   }
 }
 
@@ -388,12 +391,17 @@ Deno.serve(async (req) => {
           supabase.storage.from('images').upload(filePath, imageBytes, { contentType: mime, upsert: false }),
         ]);
 
-        if (!analysis.safe) {
+        if (!analysis.safe || analysis.personal) {
           if (!uploadResult.error) {
             supabase.storage.from('images').remove([filePath]).catch(() => {});
           }
           isSkipped = true;
-          body = { message: "That image can't go into the collective — it contains content that's not allowed (NSFW, graphic, or private individuals).", skipped: true };
+          body = {
+            message: analysis.personal
+              ? "That image has personal info in it (handles, notifications, messages) — I can't add that to the collective."
+              : "That image can't go into the collective — it contains content that's not allowed (NSFW or graphic).",
+            skipped: true,
+          };
         } else if (uploadResult.error) {
           isSkipped = true;
           body = { message: "Couldn't upload the image right now. Try again.", skipped: true };
@@ -577,23 +585,66 @@ Deno.serve(async (req) => {
 
     } else if (action === 'ask') {
       try {
-        const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-        await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
-
-        // If user attached an image, analyze it and incorporate the description into the chat
         let chatMessage = message;
+        let learnedImageUrl: string | null = null;
+        let learnedImageDescription: string | null = null;
+
+        // Image attached: analyze, upload, and learn it — simultaneously answer
         if (imageBase64 && ANTHROPIC_API_KEY) {
           const mime = (imageMimeType as string) || 'image/jpeg';
-          const analysis = await analyzeImage(ANTHROPIC_API_KEY, imageBase64 as string, mime, message);
+          const imageBytes = Uint8Array.from(atob(imageBase64 as string), c => c.charCodeAt(0));
+          const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : 'jpg';
+          const filePath = `${user.id}/${Date.now()}.${ext}`;
+
+          // Analyze and upload in parallel
+          const [analysis, uploadResult] = await Promise.all([
+            analyzeImage(ANTHROPIC_API_KEY, imageBase64 as string, mime, message),
+            supabase.storage.from('images').upload(filePath, imageBytes, { contentType: mime, upsert: false }),
+          ]);
+
           if (!analysis.safe) {
+            if (!uploadResult.error) supabase.storage.from('images').remove([filePath]).catch(() => {});
             body = { response: "That image contains content I can't engage with." };
           } else {
-            chatMessage = `[User shared an image: ${analysis.description}]${message ? `\n\nUser says: ${message}` : ''}`;
+            if (!uploadResult.error && !analysis.personal) {
+              // Only add to collective if image has no personal identifiers (no handles, DMs, notifications, etc.)
+              const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(uploadResult.data.path);
+              learnedImageUrl = publicUrl;
+              learnedImageDescription = analysis.description;
+              supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description: analysis.description }).catch(() => {});
+            } else if (!uploadResult.error && analysis.personal) {
+              // Still uploaded but not shared — remove from storage
+              supabase.storage.from('images').remove([filePath]).catch(() => {});
+            }
+            chatMessage = `[User shared an image: ${analysis.description}]${message ? `\n\nUser asks: ${message}` : ''}`;
           }
         }
 
         if (!body) {
-          const chatResult = await withTimeout(agent.chat(chatMessage, history), 25000);
+          const chatAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+          const ingestAgent = learnedImageUrl
+            ? new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID })
+            : null;
+
+          // Set system prompts in parallel
+          await Promise.all([
+            withTimeout(chatAgent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {}),
+            ingestAgent
+              ? withTimeout(ingestAgent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {})
+              : Promise.resolve(),
+          ]);
+
+          const ingestText = learnedImageUrl && learnedImageDescription
+            ? stampDate(`${learnedImageDescription}${message ? `\n\nContributor context: ${message}` : ''}\n\n[IMAGE: ${learnedImageUrl}]`)
+            : '';
+
+          // Chat + ingest run in parallel — answer the question and learn the image at the same time
+          const [chatResult] = await Promise.all([
+            withTimeout(chatAgent.chat(chatMessage, history), 25000),
+            ingestAgent && ingestText
+              ? withTimeout(ingestAgent.ingest(ingestText), 25000).catch(() => {})
+              : Promise.resolve(),
+          ]);
 
           // Extract [IMAGE: url] tags AND bare Supabase storage URLs from the response
           const imageTagRegex = /\[IMAGE:\s*(https?:\/\/[^\]]+)\]/gi;
@@ -602,13 +653,12 @@ Deno.serve(async (req) => {
 
           let cleanResponse = chatResult.response
             .replace(imageTagRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; });
-
           cleanResponse = cleanResponse
             .replace(bareStorageRegex, (url: string) => { inlineUrls.push(url.trim()); return ''; })
             .replace(/\n{3,}/g, '\n\n')
             .trim();
 
-          // Only show images the agent explicitly referenced — never show random/recent images
+          // Show agent-referenced images, or echo back the just-uploaded image
           let allImages: { url: string; description: string }[] = [];
           if (inlineUrls.length > 0) {
             const { data: inlineData } = await supabase
@@ -617,6 +667,8 @@ Deno.serve(async (req) => {
               .in('image_url', inlineUrls);
             const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
             allImages = inlineUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
+          } else if (learnedImageUrl && learnedImageDescription) {
+            allImages = [{ url: learnedImageUrl, description: learnedImageDescription }];
           }
 
           body = {
