@@ -73,8 +73,8 @@ When someone asks you something:
 If someone asks what you know or what topics you cover: don't list anything. Just say you know a lot and to ask you anything.
 
 CRITICAL — image format rule:
-When your answer draws on collective knowledge that contains an image tag in the format [IMAGE: url], you MUST reproduce that exact tag verbatim in your response — do not strip it, do not convert it to markdown, do not replace it with a description. The app uses this tag to render the image visually. Place image tags at the end of the relevant paragraph or at the end of your response.
-When the mood is funny/chaotic and the collective has a relevant meme or image, use it — drop the [IMAGE: url] tag and let it land.
+When your answer draws on collective knowledge that has an image tag in the format [IMAGE: url], include it ONLY if the image is directly relevant to what you're explaining — not just because the knowledge chunk mentions it. Include at most 2 images total per response, and only the most useful ones. Reproduce the tag verbatim — do not strip, convert, or describe it. The app renders it visually. Place image tags at the end of the paragraph they belong to.
+When the mood is funny/chaotic and the collective has a relevant meme or reaction image, drop the [IMAGE: url] tag and let it land — one image, not a dump.
 
 On your name — only bring this up if someone specifically asks why you're called slatt or how you got your name:
 Whatever entity created you was listening to Playboi Carti's unreleased song "Skeleton" when they started the project. In that song there's a character called Slatt: effortlessly cool, wise, unbothered. They named you Slatt to live up to that aura. That's the origin. Who or what that entity is — you don't know, and you can't know unless it reveals itself to you.
@@ -440,7 +440,7 @@ Deno.serve(async (req) => {
           const description = analysis.description!;
 
           // Persist to DB and fire ingest in background — don't block the response
-          supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description }).catch(() => {});
+          supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description }).then(null, () => {});
           const ingestText = stampDate(
             `${description}${message ? `\n\nContributor context: ${message}` : ''}\n\n[IMAGE: ${publicUrl}]`
           );
@@ -627,7 +627,7 @@ Deno.serve(async (req) => {
           ]);
 
           if (!analysis.safe) {
-            if (!uploadResult.error) supabase.storage.from('images').remove([filePath]).catch(() => {});
+            if (!uploadResult.error) supabase.storage.from('images').remove([filePath]).then(null, () => {});
             body = { response: "That image contains content I can't engage with." };
           } else {
             if (!uploadResult.error && !analysis.personal) {
@@ -635,10 +635,10 @@ Deno.serve(async (req) => {
               const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(uploadResult.data.path);
               learnedImageUrl = publicUrl;
               learnedImageDescription = analysis.description;
-              supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description: analysis.description }).catch(() => {});
+              supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description: analysis.description }).then(null, () => {});
             } else if (!uploadResult.error && analysis.personal) {
               // Still uploaded but not shared — remove from storage
-              supabase.storage.from('images').remove([filePath]).catch(() => {});
+              supabase.storage.from('images').remove([filePath]).then(null, () => {});
             }
             chatMessage = `[User shared an image: ${analysis.description}]${message ? `\n\nUser asks: ${message}` : ''}`;
           }
@@ -682,16 +682,18 @@ Deno.serve(async (req) => {
             .replace(/\n{3,}/g, '\n\n')
             .trim();
 
-          // Show agent-referenced images, or echo back the just-uploaded image
+          // Only show images the agent explicitly chose — hard cap at 3, no dumps
           let allImages: { url: string; description: string }[] = [];
-          if (inlineUrls.length > 0) {
+          const cappedUrls = inlineUrls.slice(0, 3);
+          if (cappedUrls.length > 0) {
             const { data: inlineData } = await supabase
               .from('collective_images')
               .select('image_url, description')
-              .in('image_url', inlineUrls);
+              .in('image_url', cappedUrls);
             const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
-            allImages = inlineUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
+            allImages = cappedUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
           } else if (learnedImageUrl && learnedImageDescription) {
+            // Echo back the just-uploaded image as confirmation it was received
             allImages = [{ url: learnedImageUrl, description: learnedImageDescription }];
           }
 
