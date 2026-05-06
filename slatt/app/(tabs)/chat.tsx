@@ -167,10 +167,13 @@ type PendingImage = { uri: string; base64: string; mimeType: string };
 // ── Image gallery (ask responses) ─────────────────────────────────────────────
 
 const ImageGallery = memo(function ImageGallery({
-  images,
+  images: rawImages,
 }: {
   images: { url: string; description: string }[];
 }) {
+  // Deduplicate by URL before rendering
+  const seen = new Set<string>();
+  const images = rawImages.filter(img => { if (seen.has(img.url)) return false; seen.add(img.url); return true; });
   const [activeIdx, setActiveIdx] = useState(0);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const [savingUrl, setSavingUrl] = useState<string | null>(null);

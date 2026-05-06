@@ -739,8 +739,8 @@ Deno.serve(async (req) => {
             allImages = [{ url: learnedImageUrl, description: learnedImageDescription }];
           } else {
             // Always try to find relevant images from the collective.
-            // Priority 1: any storage URLs the agent happened to include in its response
-            const cappedUrls = inlineUrls.slice(0, 2);
+            // Priority 1: any storage URLs the agent happened to include in its response (deduplicated)
+            const cappedUrls = [...new Set(inlineUrls)].slice(0, 2);
             if (cappedUrls.length > 0) {
               const { data: inlineData } = await supabase
                 .from('collective_images')
