@@ -60,14 +60,13 @@ export default function RootLayout() {
     ]).start();
   }, []);
 
-  useEffect(() => { loadLang(); }, []);
-
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Await both session and language before showing any UI — prevents flash and re-render lag
+    Promise.all([
+      supabase.auth.getSession().then(({ data: { session } }) => session).catch(() => null),
+      loadLang(),
+    ]).then(([session]) => {
       setSession(session);
-      setInitialized(true);
-    }).catch(() => {
-      setSession(null);
       setInitialized(true);
     });
 

@@ -172,14 +172,18 @@ const ImageGallery = memo(function ImageGallery({
   images: { url: string; description: string }[];
 }) {
   const [activeIdx, setActiveIdx] = useState(0);
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const [savingUrl, setSavingUrl] = useState<string | null>(null);
   const CARD_W = SCREEN_W * 0.72;
 
   const handleSave = useCallback(async (url: string) => {
+    if (savingUrl) return;
     const { granted } = await MediaLibrary.requestPermissionsAsync();
     if (!granted) {
       Alert.alert(t('permissionNeeded'), t('permissionPhotoMsg'));
       return;
     }
+    setSavingUrl(url);
     try {
       const ext = url.split('?')[0].split('.').pop() ?? 'jpg';
       const localUri = FileSystem.cacheDirectory + `slatt_${Date.now()}.${ext}`;
@@ -189,13 +193,21 @@ const ImageGallery = memo(function ImageGallery({
       Alert.alert(t('saved'), t('savedMsg'));
     } catch {
       Alert.alert('Error', t('couldNotSave'));
+    } finally {
+      setSavingUrl(null);
     }
-  }, []);
+  }, [savingUrl]);
 
   if (!images.length) return null;
 
   return (
-    <View style={{ marginTop: 10, height: 260 }}>
+    <View style={{ marginTop: 10 }}>
+      {images.length > 1 && (
+        <View style={ig.swipeHint}>
+          <Feather name="chevrons-right" size={11} color="rgba(255,255,255,0.3)" />
+          <Text style={ig.swipeText}>swipe for more</Text>
+        </View>
+      )}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -214,18 +226,21 @@ const ImageGallery = memo(function ImageGallery({
           <TouchableOpacity
             key={i}
             activeOpacity={0.92}
-            onLongPress={() => handleSave(img.url)}
-            delayLongPress={400}
+            onPress={() => setViewerUrl(img.url)}
             style={[ig.card, { width: CARD_W }]}
           >
-            <Image
-              source={{ uri: img.url }}
-              style={ig.img}
-              resizeMode="cover"
-            />
+            <Image source={{ uri: img.url }} style={ig.img} resizeMode="cover" />
+            <TouchableOpacity
+              style={ig.saveBtn}
+              onPress={() => handleSave(img.url)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              {savingUrl === img.url
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Feather name="download" size={14} color="#fff" />}
+            </TouchableOpacity>
             <View style={ig.caption}>
               <Text style={ig.captionText} numberOfLines={2}>{img.description}</Text>
-              <Text style={ig.hint}>{t('holdToSave')}</Text>
             </View>
           </TouchableOpacity>
         ))}
@@ -237,6 +252,25 @@ const ImageGallery = memo(function ImageGallery({
           ))}
         </View>
       )}
+
+      {/* Full-screen image viewer */}
+      <Modal visible={viewerUrl !== null} transparent animationType="fade" onRequestClose={() => setViewerUrl(null)}>
+        <View style={ig.viewerOverlay}>
+          <TouchableOpacity style={ig.viewerClose} onPress={() => setViewerUrl(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Feather name="x" size={22} color="#fff" />
+          </TouchableOpacity>
+          {viewerUrl && (
+            <Image source={{ uri: viewerUrl }} style={ig.viewerImg} resizeMode="contain" />
+          )}
+          {viewerUrl && (
+            <TouchableOpacity style={ig.viewerSaveBtn} onPress={() => handleSave(viewerUrl)} activeOpacity={0.8}>
+              {savingUrl === viewerUrl
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <><Feather name="download" size={16} color="#fff" /><Text style={ig.viewerSaveText}>Save</Text></>}
+            </TouchableOpacity>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 });
@@ -247,13 +281,35 @@ const ig = StyleSheet.create({
     backgroundColor: '#111',
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
   },
-  img: { width: '100%', height: 200 },
-  caption: { padding: 10 },
-  captionText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, lineHeight: 17 },
-  hint: { color: 'rgba(255,255,255,0.25)', fontSize: 10, marginTop: 4 },
+  img: { width: '100%', height: 180 },
+  saveBtn: {
+    position: 'absolute', top: 10, right: 10,
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  caption: { padding: 10, paddingTop: 8 },
+  captionText: { color: 'rgba(255,255,255,0.65)', fontSize: 11, lineHeight: 16 },
+  swipeHint: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+  swipeText: { color: 'rgba(255,255,255,0.28)', fontSize: 10, fontWeight: '600', letterSpacing: 0.5 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 },
   dot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: 'rgba(255,255,255,0.2)' },
   dotActive: { backgroundColor: 'rgba(255,255,255,0.65)', width: 14 },
+  viewerOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.93)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  viewerClose: { position: 'absolute', top: 56, right: 20, zIndex: 10 },
+  viewerImg: { width: SCREEN_W, height: SCREEN_W },
+  viewerSaveBtn: {
+    position: 'absolute', bottom: 60,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 22, paddingVertical: 12,
+    borderRadius: 24, borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  viewerSaveText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 });
 
 function detectMode(text: string): Mode {

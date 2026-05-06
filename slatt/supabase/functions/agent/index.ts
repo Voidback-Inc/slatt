@@ -579,61 +579,52 @@ Deno.serve(async (req) => {
       try {
         const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
         await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
-        // Determine if the user is asking for images specifically
-        const isImageRequest = /\b(image|photo|picture|pic|visual|show me|give me|send me)\b/i.test(message);
 
-        const [chatResult, imageResult] = await Promise.all([
-          withTimeout(agent.chat(message, history), 25000),
-          isImageRequest
-            ? supabase
-                .from('collective_images')
-                .select('image_url, description')
-                .order('created_at', { ascending: false })
-                .limit(12)
-            : Promise.resolve({ data: [] }),
-        ]);
-
-        // Extract [IMAGE: url] tags AND bare Supabase storage URLs that leaked through
-        const imageTagRegex = /\[IMAGE:\s*(https?:\/\/[^\]]+)\]/gi;
-        const bareStorageRegex = /https?:\/\/[a-z0-9]+\.supabase\.co\/storage\/v1\/object\/public\/images\/[^\s)"'<>\]]+/gi;
-        const inlineUrls: string[] = [];
-
-        let cleanResponse = chatResult.response
-          .replace(imageTagRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; });
-
-        // Catch any bare storage URLs still in the text
-        cleanResponse = cleanResponse
-          .replace(bareStorageRegex, (url: string) => { inlineUrls.push(url.trim()); return ''; })
-          .replace(/\n{3,}/g, '\n\n')
-          .trim();
-
-        // Fetch descriptions for inline image URLs from the DB
-        let allImages: { url: string; description: string }[];
-
-        if (inlineUrls.length > 0) {
-          // Agent explicitly referenced these images — always show them
-          const { data: inlineData } = await supabase
-            .from('collective_images')
-            .select('image_url, description')
-            .in('image_url', inlineUrls);
-          const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
-          const inlineImages = inlineUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
-          const ftsImages = (imageResult.data ?? []).map((r: any) => ({ url: r.image_url, description: r.description }));
-          const seen = new Set(inlineUrls);
-          allImages = [...inlineImages, ...ftsImages.filter((i: any) => !seen.has(i.url))].slice(0, 8);
-        } else if (isImageRequest) {
-          // User asked for images explicitly — show recent/FTS results
-          allImages = (imageResult.data ?? []).map((r: any) => ({ url: r.image_url, description: r.description })).slice(0, 8);
-        } else {
-          // Regular question — no images
-          allImages = [];
+        // If user attached an image, analyze it and incorporate the description into the chat
+        let chatMessage = message;
+        if (imageBase64 && ANTHROPIC_API_KEY) {
+          const mime = (imageMimeType as string) || 'image/jpeg';
+          const analysis = await analyzeImage(ANTHROPIC_API_KEY, imageBase64 as string, mime, message);
+          if (!analysis.safe) {
+            body = { response: "That image contains content I can't engage with." };
+          } else {
+            chatMessage = `[User shared an image: ${analysis.description}]${message ? `\n\nUser says: ${message}` : ''}`;
+          }
         }
 
-        body = {
-          response: cleanResponse,
-          relevant_entities: chatResult.relevant_entities,
-          images: allImages,
-        };
+        if (!body) {
+          const chatResult = await withTimeout(agent.chat(chatMessage, history), 25000);
+
+          // Extract [IMAGE: url] tags AND bare Supabase storage URLs from the response
+          const imageTagRegex = /\[IMAGE:\s*(https?:\/\/[^\]]+)\]/gi;
+          const bareStorageRegex = /https?:\/\/[a-z0-9]+\.supabase\.co\/storage\/v1\/object\/public\/images\/[^\s)"'<>\]]+/gi;
+          const inlineUrls: string[] = [];
+
+          let cleanResponse = chatResult.response
+            .replace(imageTagRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; });
+
+          cleanResponse = cleanResponse
+            .replace(bareStorageRegex, (url: string) => { inlineUrls.push(url.trim()); return ''; })
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+
+          // Only show images the agent explicitly referenced — never show random/recent images
+          let allImages: { url: string; description: string }[] = [];
+          if (inlineUrls.length > 0) {
+            const { data: inlineData } = await supabase
+              .from('collective_images')
+              .select('image_url, description')
+              .in('image_url', inlineUrls);
+            const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
+            allImages = inlineUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
+          }
+
+          body = {
+            response: cleanResponse,
+            relevant_entities: chatResult.relevant_entities,
+            images: allImages,
+          };
+        }
       } catch (agentErr) {
         return new Response(
           JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),

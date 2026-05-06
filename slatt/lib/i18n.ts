@@ -666,6 +666,8 @@ const TRANSLATIONS: Record<LangCode, Strings> = {
 // ── Module-level state ────────────────────────────────────────────────────────
 
 let _lang: LangCode = 'en';
+let _loaded = false;
+let _loadPromise: Promise<LangCode> | null = null;
 const _listeners: Array<(lang: LangCode) => void> = [];
 
 export function getCurrentLang(): LangCode { return _lang; }
@@ -677,18 +679,29 @@ export function t(key: keyof Strings): string {
 
 export function setLang(code: LangCode): void {
   _lang = code;
+  _loaded = true;
   SecureStore.setItemAsync('app_language', code).catch(() => {});
   _listeners.slice().forEach(cb => cb(code));
 }
 
-export async function loadLang(): Promise<LangCode> {
-  try {
-    const stored = await SecureStore.getItemAsync('app_language');
-    if (stored && LANGUAGES.find(l => l.code === stored)) {
-      _lang = stored as LangCode;
-    }
-  } catch {}
-  return _lang;
+export function loadLang(): Promise<LangCode> {
+  if (_loaded) return Promise.resolve(_lang);
+  if (_loadPromise) return _loadPromise;
+  _loadPromise = SecureStore.getItemAsync('app_language')
+    .then(stored => {
+      if (stored && LANGUAGES.find(l => l.code === stored)) {
+        _lang = stored as LangCode;
+      }
+      _loaded = true;
+      _loadPromise = null;
+      return _lang;
+    })
+    .catch(() => {
+      _loaded = true;
+      _loadPromise = null;
+      return _lang;
+    });
+  return _loadPromise;
 }
 
 export function onLangChange(cb: (lang: LangCode) => void): () => void {
