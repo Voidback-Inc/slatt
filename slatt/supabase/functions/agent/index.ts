@@ -62,7 +62,7 @@ const cors = {
 };
 
 type HistoryMessage = { role: string; content: string };
-type EvalVerdict = 'ACCEPT' | 'NEEDS_EVIDENCE' | 'REJECT';
+type EvalVerdict = 'ACCEPT' | 'NEEDS_EVIDENCE' | 'REJECT' | 'CHAT';
 
 // ── Trusted domain registry ───────────────────────────────────────────────────
 // Only HTTPS sources from this set are treated as trusted evidence.
@@ -151,23 +151,25 @@ async function evaluateAndRespond(
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 200,
-          system: `You are slatt. Two jobs: classify the teaching, then reply naturally.
+          system: `You are slatt. Classify what the user sent, then reply naturally.
 
 OUTPUT — two lines, nothing else:
-VERDICT: ACCEPT | ACCEPT:ANECDOTAL | NEEDS_EVIDENCE | REJECT
+VERDICT: CHAT | ACCEPT | ACCEPT:ANECDOTAL | NEEDS_EVIDENCE | REJECT
 [Your reply]
 
-VERDICT rules (default to ACCEPT):
+VERDICT rules:
+CHAT = greetings, questions, reactions, chit-chat, anything that is NOT a teaching or factual claim — respond like a friend
 ACCEPT:ANECDOTAL = direct first-person account (I/my/me/my friend did/tried/noticed)
-ACCEPT = facts, tips, how-to, culture, general knowledge
+ACCEPT = facts, tips, how-to, culture, general knowledge worth storing
 NEEDS_EVIDENCE = medical/legal/financial claim that could harm if wrong; suspicious stat as absolute fact
 REJECT = you are CERTAIN it is factually wrong or dangerous
 ${urlContext}
 
 REPLY rules — sound like a smart curious friend, NOT a database:
-ACCEPT/ANECDOTAL: 1-2 sentences. Genuine reaction. Optional follow-up question if it flows. Never say "filed", "stored", "logged", "noted", "collective", "I'll remember".
-NEEDS_EVIDENCE: Ask for a source or more context, casually, 1 sentence.
-REJECT: Say why briefly, 1 sentence.`,
+CHAT: respond naturally to whatever they said, 1-2 sentences
+ACCEPT/ANECDOTAL: genuine reaction, 1-2 sentences, optional follow-up question if it flows naturally. Never say "filed", "stored", "logged", "noted", "collective", "I'll remember".
+NEEDS_EVIDENCE: ask for a source casually, 1 sentence.
+REJECT: say why briefly, 1 sentence.`,
           messages: [{ role: 'user', content: teaching }],
         }),
       }),
@@ -187,6 +189,7 @@ REJECT: Say why briefly, 1 sentence.`,
     if (verdictRaw.startsWith('ACCEPT:ANECDOTAL')) return { verdict: 'ACCEPT', isAnecdotal: true, response };
     if (verdictRaw.startsWith('NEEDS_EVIDENCE')) return { verdict: 'NEEDS_EVIDENCE', response };
     if (verdictRaw.startsWith('REJECT')) return { verdict: 'REJECT', response };
+    if (verdictRaw.startsWith('CHAT')) return { verdict: 'CHAT', response };
     return { verdict: 'ACCEPT', response };
   } catch {
     return { verdict: 'ACCEPT', response: 'Cool.' };
@@ -194,13 +197,6 @@ REJECT: Say why briefly, 1 sentence.`,
 }
 
 // ── Misc helpers ──────────────────────────────────────────────────────────────
-
-function worthStoring(text: string): { ok: boolean } {
-  const t = text.trim();
-  if (t.length < 10) return { ok: false };
-  if (t.endsWith('?') && t.split(/\s+/).length < 7) return { ok: false };
-  return { ok: true };
-}
 
 // Detect conversational meta-comments that aren't actually teachings
 function isConversational(text: string, history: HistoryMessage[]): boolean {
@@ -506,25 +502,24 @@ Deno.serve(async (req) => {
       } else {
         // ── Standard new teach ────────────────────────────────────────────────────
 
-        // Step 1: quick pre-filter — not a lesson, just talk
-        const check = worthStoring(message);
-        if (!check.ok) {
-          isSkipped = true;
-          try {
-            const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-            await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
-            const result = await withTimeout(agent.chat(message, history), 25000);
-            body = { message: result.response };
-          } catch {
-            body = { message: "hey", skipped: true };
-          }
-        } else {
-          // Step 2: AI evaluation + natural acknowledgment (single call)
+        {
+          // Single LLM call decides: is this a teaching or a conversation?
           const evaluation = ANTHROPIC_API_KEY
             ? await evaluateAndRespond(ANTHROPIC_API_KEY, message, urls, hasTrustedUrl)
             : { verdict: 'ACCEPT' as EvalVerdict, response: 'Cool.' };
 
-          if (evaluation.verdict === 'REJECT') {
+          if (evaluation.verdict === 'CHAT') {
+            // Not a teaching — respond conversationally via the knowledge agent
+            isSkipped = true;
+            try {
+              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {});
+              const result = await withTimeout(agent.chat(message, history), 25000);
+              body = { message: result.response };
+            } catch {
+              body = { message: evaluation.response, skipped: true };
+            }
+          } else if (evaluation.verdict === 'REJECT') {
             isSkipped = true;
             body = { message: evaluation.response, skipped: true };
           } else if (evaluation.verdict === 'NEEDS_EVIDENCE') {
@@ -574,7 +569,7 @@ Deno.serve(async (req) => {
           }
         }
       }
-      } // end else (not conversational/question)
+      }
 
     } else if (action === 'ask') {
       try {
