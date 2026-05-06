@@ -75,13 +75,10 @@ When someone asks you something:
 If someone asks what you know or what topics you cover: don't list anything. Just say you know a lot and to ask you anything.
 
 CRITICAL — image rule:
-Visuals keep the experience alive — always look for image tags in the knowledge you retrieve and include them when they add value. If the collective knowledge you're drawing from contains [IMAGE: url] tags, reproduce them verbatim in your response — do not strip, convert, or describe them. The app renders them visually.
-Rules:
-- Format must be exactly: [IMAGE: https://...] — capital IMAGE, colon, space, full URL, closing bracket. No markdown, no quotes, no line breaks inside the tag.
-- Max 2 images per response. Pick the most relevant ones, not all of them.
-- Place ALL image tags at the very end of your response, after all your text — never in the middle of a paragraph.
-- If the knowledge has no images, don't fabricate URLs — just answer in text.
-- For funny/meme moments: one well-placed image lands harder than a dump.
+The app handles images automatically — you never need to include image URLs or [IMAGE: ...] tags in your response. Images are surfaced to the user separately based on what you discuss. Just answer naturally; visuals are taken care of.
+- Never output image URLs or [IMAGE: ...] tags in your response text.
+- Never fabricate URLs.
+- For funny/meme moments: keep your reply short and punchy — the image speaks for itself.
 Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 💀 or 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
 
 On your name — only bring this up if someone specifically asks why you're called slatt or how you got your name:
@@ -684,20 +681,21 @@ Deno.serve(async (req) => {
             ? chatResult.response
             : (chatResult?.response != null ? String(chatResult.response) : '');
 
-          // Extract image URLs — two passes:
-          // 1. Any [...] bracket containing a Supabase storage URL
-          // 2. Bare storage URLs that leaked through without brackets
+          // Step 1: Extract all Supabase storage URLs from the raw response BEFORE any cleanup.
+          // Using matchAll on rawResponse is more reliable than capture groups inside replace().
           const storageUrlPattern = `https?://[a-z0-9]+\\.supabase\\.co/storage/v1/object/public/images/[^\\s\\])"'<>]+`;
-          const bracketedImageRegex = new RegExp(`\\[[^\\]]*?(${storageUrlPattern})[^\\]]*?\\]`, 'gi');
-          const bareStorageRegex = new RegExp(storageUrlPattern, 'gi');
-          const inlineUrls: string[] = [];
+          const storageRegex = new RegExp(storageUrlPattern, 'gi');
+          const inlineUrls: string[] = [...(rawResponse.matchAll(storageRegex) ?? [])].map(m => m[0].trim());
 
+          // Step 2: Strip the response clean of all possible image-tag formats.
+          // Order matters: bracket patterns first (most specific), then bare URLs, then orphaned keywords.
           let cleanResponse = rawResponse
-            .replace(bracketedImageRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; });
-          cleanResponse = cleanResponse
-            .replace(bareStorageRegex, (url: string) => { inlineUrls.push(url.trim()); return ''; })
-            // Final safety: catch any remaining [IMAGE: ...] / [image: ...] patterns in any format
-            .replace(/\[(?:IMAGE|image|Image):\s*[^\]]*\]/g, '')
+            // [IMAGE: url] / [image: url] / [IMAGE:url] — any bracket wrapping, any URL
+            .replace(/\[(?:IMAGE|image|Image)[^\]]*\]/g, '')
+            // bare Supabase storage URLs (already captured above)
+            .replace(storageRegex, '')
+            // orphaned IMAGE: keyword left if brackets were stripped separately
+            .replace(/IMAGE:\s*/gi, '')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
 
