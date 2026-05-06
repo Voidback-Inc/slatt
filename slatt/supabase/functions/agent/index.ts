@@ -647,10 +647,37 @@ Deno.serve(async (req) => {
             .order('created_at', { ascending: false })
             .limit(8),
         ]);
+
+        // Strip [IMAGE: url] tags injected by the knowledge base from the response text
+        const imageTagRegex = /\[IMAGE:\s*(https?:\/\/[^\]]+)\]/gi;
+        const inlineUrls: string[] = [];
+        const cleanResponse = chatResult.response
+          .replace(imageTagRegex, (_: string, url: string) => { inlineUrls.push(url.trim()); return ''; })
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+
+        // Fetch descriptions for inline image URLs from the DB
+        const ftsImages = (imageResult.data ?? []).map((r: any) => ({ url: r.image_url, description: r.description }));
+        let allImages: { url: string; description: string }[];
+
+        if (inlineUrls.length > 0) {
+          const { data: inlineData } = await supabase
+            .from('collective_images')
+            .select('image_url, description')
+            .in('image_url', inlineUrls);
+          const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
+          // Inline images first (directly referenced), then additional FTS images
+          const inlineImages = inlineUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
+          const seen = new Set(inlineUrls);
+          allImages = [...inlineImages, ...ftsImages.filter((i: any) => !seen.has(i.url))].slice(0, 8);
+        } else {
+          allImages = ftsImages.slice(0, 8);
+        }
+
         body = {
-          response: chatResult.response,
+          response: cleanResponse,
           relevant_entities: chatResult.relevant_entities,
-          images: (imageResult.data ?? []).map(r => ({ url: r.image_url, description: r.description })),
+          images: allImages,
         };
       } catch (agentErr) {
         return new Response(
