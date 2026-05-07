@@ -71,7 +71,7 @@
           "iosActivationRules": {
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
             "NSExtensionActivationSupportsWebPageWithMaxCount": 1,
-            "NSExtensionActivationSupportsText": 1
+            "NSExtensionActivationSupportsText": true
           },
           "androidIntentFilters": ["text/*"]
         }
