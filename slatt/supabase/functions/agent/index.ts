@@ -106,7 +106,7 @@ const cors = {
 };
 
 type HistoryMessage = { role: string; content: string };
-type EvalVerdict = 'ACCEPT' | 'NEEDS_EVIDENCE' | 'REJECT' | 'CHAT' | 'AD';
+type EvalVerdict = 'ACCEPT' | 'NEEDS_EVIDENCE' | 'REJECT' | 'CHAT' | 'AD' | 'CORRECTION';
 
 const TRUSTED_DOMAINS = new Set([
   'nytimes.com', 'wsj.com', 'bloomberg.com', 'reuters.com', 'apnews.com',
@@ -175,14 +175,15 @@ async function evaluateAndRespond(
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 80,
           system: `Classify this message. Output EXACTLY two lines:
-VERDICT: CHAT | ACCEPT | ACCEPT:ANECDOTAL | NEEDS_EVIDENCE | REJECT | AD
+VERDICT: CHAT | ACCEPT | ACCEPT:ANECDOTAL | NEEDS_EVIDENCE | REJECT | AD | CORRECTION
 
-CHAT = greetings, jokes, reactions, questions, chit-chat, casual banter
-ACCEPT:ANECDOTAL = any first-person experience, behavior, habit, observation — health, food, work, exercise, relationships, daily life
+CHAT = greetings, jokes, reactions, questions, chit-chat, casual banter with no factual claim
+ACCEPT:ANECDOTAL = any first-person experience, behavior, habit, personal observation — health, food, work, exercise, relationships, daily life
 ACCEPT = verifiable facts, tips, how-to, culture, general knowledge, questions paired with knowledge
-NEEDS_EVIDENCE = ONLY for: political claims, legal claims, breaking news / current events, niche technical claims where precision matters (exact specs, legal rulings, scientific findings). Personal experiences, general knowledge, opinions, recommendations, and casual facts are NEVER NEEDS_EVIDENCE.
+NEEDS_EVIDENCE = ONLY for: political claims, legal claims, breaking news / current events, niche technical claims (exact specs, legal rulings, scientific findings). Personal experiences, general knowledge, opinions are NEVER NEEDS_EVIDENCE.
 REJECT = content you are certain is dangerous misinformation (e.g. "bleach cures COVID")
 AD = promotional content pushing a product/brand for commercial gain with discount codes, affiliate links, "buy X", product spec listings
+CORRECTION = user is explicitly correcting or contradicting something stated earlier in the conversation (e.g. "no it's actually X", "wait that's wrong", "nah it's Y not Z")
 ${urlContext}`,
           messages: [{ role: 'user', content: teaching }],
         }),
@@ -199,6 +200,7 @@ ${urlContext}`,
     if (verdictRaw.startsWith('REJECT')) return { verdict: 'REJECT', response: '' };
     if (verdictRaw.startsWith('CHAT')) return { verdict: 'CHAT', response: '' };
     if (verdictRaw.startsWith('AD')) return { verdict: 'AD', response: '' };
+    if (verdictRaw.startsWith('CORRECTION')) return { verdict: 'CORRECTION', isAnecdotal: true, response: '' };
     return { verdict: 'ACCEPT', response: '' };
   } catch {
     return { verdict: 'ACCEPT', response: '' };
@@ -209,7 +211,7 @@ ${urlContext}`,
 async function extractSearchTerms(
   anthropicKey: string,
   message: string,
-): Promise<{ imageTerms: string[]; contentTerms: string[]; linkTerms: string[] }> {
+): Promise<{ imageTerms: string[]; contentTerms: string[]; linkTerms: string[]; intent: 'social' | 'query' }> {
   try {
     const res = await withTimeout(
       fetch('https://api.anthropic.com/v1/messages', {
@@ -221,35 +223,49 @@ async function extractSearchTerms(
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 80,
+          max_tokens: 100,
           messages: [{
             role: 'user',
-            content: `User message (any language): "${message}"\n\nReply in EXACTLY this format, three lines:\nIMAGE: <1-5 specific English keywords for the main object type + any distinguishing traits (brand, model, category). E.g. "hard drive, seagate, storage" or "sneakers, air jordan, nike". If asking about a physical thing even implicitly, fire. NONE only for music/audio/abstract/opinions.>\nLINK: <1-3 English keywords if the message mentions or asks about any named thing that could have a stored URL: a song, artist, album, video, film, show, podcast, article, product, brand, event, person, place, or topic. Fire broadly — any named subject. NONE only for pure abstract concepts, math, code questions, or generic opinions with no named subject.>\nCONTENT: <same as LINK — 1-3 English keywords for any named media (song, artist, album, video, film, show, podcast). NONE for non-media.>\n\nRules:\n- IMAGE fires for anything about a concrete identifiable physical thing. Include category + specific sub-terms.\n- IMAGE must be NONE for: music, audio, abstract concepts, math, general trivia, pure opinions\n- LINK fires very broadly: a person's name, a song title, a brand, a news topic, a place — anything with a possible URL\n- CONTENT fires for named media items specifically (more narrow than LINK)\n- Translate non-English subject matter to English\n- Keywords are comma-separated lowercase`,
+            content: `User message (any language): "${message}"
+
+Reply in EXACTLY this format, four lines:
+IMAGE: <1-5 English keywords for the physical object/thing being asked about (brand, model, category). NONE for music, audio, or anything non-physical.>
+LINK: <1-3 English keywords if any named entity appears that could have a stored URL — song title, artist name, brand, person, place, product, event, media. Return the name/term even if it's short, abbreviated, or in slang — "nn", "wsp", "carti", "tf" are all valid if they could be names. NONE only if the message contains zero named references whatsoever.>
+CONTENT: <1-3 English keywords for a specifically named media item (song, album, artist, video, podcast). NONE for non-media.>
+INTENT: social | query
+
+INTENT "social" = pure social/conversational with absolutely no named entity reference (hi, bye, ok, lol, haha, night, etc.)
+INTENT "query" = anything that references a named person, thing, place, media, or brand — even if abbreviated or ambiguous
+Keywords are comma-separated lowercase English.`,
           }],
         }),
       }),
       5000,
     );
-    if (!res.ok) return { imageTerms: [], contentTerms: [], linkTerms: [] };
+    if (!res.ok) return { imageTerms: [], contentTerms: [], linkTerms: [], intent: 'query' };
     const data = await res.json();
     const text: string = (data.content?.[0]?.text ?? '').trim();
 
     const parseTerms = (line: string, prefix: string): string[] => {
       const val = line.replace(new RegExp(`^${prefix}:\\s*`, 'i'), '').trim();
       if (!val || val.toUpperCase() === 'NONE') return [];
-      return val.split(',').map((t: string) => t.trim().toLowerCase()).filter((t: string) => t.length >= 2).slice(0, 5);
+      return val.split(',').map((t: string) => t.trim().toLowerCase()).filter((t: string) => t.length >= 1).slice(0, 5);
     };
 
-    const imgLine = text.split('\n').find((l: string) => /^IMAGE:/i.test(l)) ?? '';
-    const lnkLine = text.split('\n').find((l: string) => /^LINK:/i.test(l)) ?? '';
-    const cntLine = text.split('\n').find((l: string) => /^CONTENT:/i.test(l)) ?? '';
+    const lines = text.split('\n');
+    const imgLine = lines.find((l: string) => /^IMAGE:/i.test(l)) ?? '';
+    const lnkLine = lines.find((l: string) => /^LINK:/i.test(l)) ?? '';
+    const cntLine = lines.find((l: string) => /^CONTENT:/i.test(l)) ?? '';
+    const intLine = lines.find((l: string) => /^INTENT:/i.test(l)) ?? '';
+    const intentVal = intLine.replace(/^INTENT:\s*/i, '').trim().toLowerCase();
     return {
       imageTerms: parseTerms(imgLine, 'IMAGE'),
       linkTerms: parseTerms(lnkLine, 'LINK'),
       contentTerms: parseTerms(cntLine, 'CONTENT'),
+      intent: intentVal === 'social' ? 'social' : 'query',
     };
   } catch {
-    return { imageTerms: [], contentTerms: [], linkTerms: [] };
+    return { imageTerms: [], contentTerms: [], linkTerms: [], intent: 'query' };
   }
 }
 
@@ -400,9 +416,6 @@ function cleanResponse(raw: string): { clean: string; slattImgIds: string[] } {
   return { clean, slattImgIds };
 }
 
-const DECLINE_IMAGE_RE = /\b(no (images?|photos?|pictures?|visuals?)|don'?t have (any |an? )?(images?|photos?|pictures?|visuals?)|didn'?t find (any )?(images?|photos?|pictures?)|couldn'?t find (any )?(images?|photos?|pictures?)|no visual(s)? (on|for|of)|nothing visual)\b/i;
-const DECLINE_LINK_RE = /\b(no (links?|urls?|sources?|references?)|don'?t have (any |a )?(links?|urls?|sources?|references?)|didn'?t find (any )?(links?|urls?)|couldn'?t find (any )?(links?|urls?)|no link(s)? (for|to|on|about))\b/i;
-const CORRECTION_RE = /\b(no[,.]?\s+(it'?s|its|that'?s|that is)|actually[,.]?\s+(it'?s|its|that'?s|that is|that was)|nah[,.]?\s+(it'?s|its)|it'?s\s+(actually|really)|that'?s\s+(actually|really)|wait[,.]?\s+(it'?s|its|that'?s))\b/i;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -639,23 +652,18 @@ Deno.serve(async (req) => {
         if (check.trusted) { hasTrustedUrl = true; trustedDomain = check.domain; break; }
       }
 
-      // Detect user correcting a previous identification
-      const isCorrectionMsg = CORRECTION_RE.test(message);
-
       const memAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
 
-      // Extract search terms first so we can augment the memory query for better recall
       const [evaluation, searchTerms] = await Promise.all([
-        isCorrectionMsg
-          ? Promise.resolve({ verdict: 'ACCEPT' as EvalVerdict, isAnecdotal: true, response: '' })
-          : ANTHROPIC_API_KEY
-            ? evaluateAndRespond(ANTHROPIC_API_KEY, message, urls, hasTrustedUrl)
-            : Promise.resolve({ verdict: 'ACCEPT' as EvalVerdict, response: '' }),
+        ANTHROPIC_API_KEY
+          ? evaluateAndRespond(ANTHROPIC_API_KEY, message, urls, hasTrustedUrl)
+          : Promise.resolve({ verdict: 'ACCEPT' as EvalVerdict, response: '' }),
         ANTHROPIC_API_KEY
           ? extractSearchTerms(ANTHROPIC_API_KEY, message)
-          : Promise.resolve({ imageTerms: [] as string[], contentTerms: [] as string[], linkTerms: [] as string[] }),
+          : Promise.resolve({ imageTerms: [] as string[], contentTerms: [] as string[], linkTerms: [] as string[], intent: 'query' as const }),
       ]);
-      const { imageTerms, contentTerms, linkTerms } = searchTerms as { imageTerms: string[]; contentTerms: string[]; linkTerms: string[] };
+      const isCorrectionMsg = evaluation.verdict === 'CORRECTION';
+      const { imageTerms, contentTerms, linkTerms, intent } = searchTerms as { imageTerms: string[]; contentTerms: string[]; linkTerms: string[]; intent: 'social' | 'query' };
 
       // Augment memory query with extracted terms for better recall on media/link queries
       const memoryQuery = (linkTerms as string[]).length > 0
@@ -669,12 +677,10 @@ Deno.serve(async (req) => {
         : { response: '', memImgIds: [] as string[] };
       const { clean, slattImgIds } = cleanResponse(rawResp);
       const allImgTagIds = [...new Set([...memImgIds, ...slattImgIds])];
-      const declinesImages = DECLINE_IMAGE_RE.test(clean);
 
       // Image lookup — only runs when confirmed visual intent (imageTerms non-empty).
-      const hasImageIntent = (imageTerms as string[]).length > 0;
       let allImages: { url: string; description: string }[] = [];
-      if (!declinesImages && hasImageIntent) {
+      if ((imageTerms as string[]).length > 0) {
         // Layer 1: Tag IDs from memory/Claude (model-selected — trust with score > 0)
         if (allImgTagIds.length > 0) {
           const { data: byId } = await supabase
@@ -731,73 +737,51 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Link lookup — Layer 1: extract URLs from Antonlytics memory, ranked by relevance to query terms
+      // Link lookup — Layer 1: ranked media URLs from Antonlytics memory
       const MEDIA_URL_RE = /https?:\/\/(?:(?:www\.)?youtube\.com|youtu\.be|open\.spotify\.com|spotify\.com|soundcloud\.com|music\.apple\.com|tidal\.com|music\.youtube\.com|deezer\.com)[^\s"'\\,\]>)]+/gi;
-      const STOP_WORDS = /^(the|a|an|is|it|in|on|at|to|of|and|or|but|for|with|from|this|that|these|those|what|who|how|when|where|why|just|so|do|did|does|i|me|my|you|your|we|ur)$/i;
 
-      // Scoring helper: short terms (≤3 chars) must match as a whole word against entity name/id,
-      // not as a substring of the full JSON (avoids "nn" matching "running", "connection", etc.)
-      const scoreEntityTerms = (entity: any, terms: string[]): number => {
-        if (!terms.length) return 0;
-        const name = ((entity.name || entity.external_id || '') as string).toLowerCase().trim();
-        const propsStr = JSON.stringify(entity.properties ?? {}).toLowerCase();
-        return terms.reduce((score: number, t: string) => {
-          if (t.length <= 3) {
-            const wbRe = new RegExp(`(?:^|[\\s",:{\\[])${t}(?:$|[\\s",:\\]}])`, 'i');
-            return score + (name === t || name.startsWith(t + ' ') || wbRe.test(propsStr) ? 1 : 0);
-          }
-          return score + (propsStr.includes(t) ? 1 : 0);
-        }, 0);
-      };
-
-      const queryTermsForRanking = [...new Set([
+      // Score each entity by how many link/content terms appear in its name or properties
+      const rankingTerms = [...new Set([
         ...(linkTerms as string[]),
         ...(contentTerms as string[]),
-        ...message.trim().toLowerCase().split(/\s+/).filter((w: string) => w.length >= 2 && !STOP_WORDS.test(w)),
       ])].map((t: string) => t.toLowerCase());
 
       const urlsWithContext: { url: string; score: number }[] = [];
       for (const entity of ((memoryResult as any).entities ?? [])) {
+        const name = ((entity.name || entity.external_id || '') as string).toLowerCase();
+        const propsStr = JSON.stringify(entity.properties ?? {}).toLowerCase();
+        const score = rankingTerms.filter((t: string) => name.includes(t) || propsStr.includes(t)).length;
         const entityJson = JSON.stringify(entity).toLowerCase();
-        const entityScore = scoreEntityTerms(entity, queryTermsForRanking);
         MEDIA_URL_RE.lastIndex = 0;
         for (const m of (entityJson.matchAll(MEDIA_URL_RE) ?? [])) {
           const url = m[0].replace(/[\\]+/g, '').replace(/["']+$/, '');
           if (url.length > 15 && !urlsWithContext.some(x => x.url === url)) {
-            urlsWithContext.push({ url, score: entityScore });
+            urlsWithContext.push({ url, score });
           }
         }
       }
 
-      // Only include memory URLs where the entity actually matched a query term (score > 0)
+      // Only include memory URLs where the entity actually matched a link term (score > 0)
       const memoryUrls: string[] = urlsWithContext
         .filter(x => x.score > 0)
         .sort((a, b) => b.score - a.score)
         .map(x => x.url)
         .slice(0, 5);
 
-      // Link lookup — Layer 2: collective_links DB search using linkTerms (broad named-subject detection)
-      // Short-message fallback: if the model returned nothing (e.g. "nn", "wsp") try the raw words.
-      // Only fire when it's not a pure CHAT message — don't look for links on "night night".
-      const rawFallbackTerms: string[] = (
-        evaluation.verdict !== 'CHAT' &&
-        (linkTerms as string[]).length === 0 &&
-        (contentTerms as string[]).length === 0 &&
-        message.trim().length >= 2 &&
-        message.trim().length <= 25
-      )
-        ? message.trim().toLowerCase().split(/\s+/).filter((w: string) => w.length >= 2 && !STOP_WORDS.test(w)).slice(0, 3)
-        : [];
-      const effectiveLinkTerms = (linkTerms as string[]).length > 0
-        ? linkTerms
+      // Link lookup — Layer 2: collective_links DB search
+      // effectiveLinkTerms: use LLM-extracted terms, or fall back to raw message if intent is query
+      const effectiveLinkTerms: string[] = (linkTerms as string[]).length > 0
+        ? linkTerms as string[]
         : (contentTerms as string[]).length > 0
-          ? contentTerms
-          : rawFallbackTerms;
+          ? contentTerms as string[]
+          : intent === 'query'
+            ? [message.trim().toLowerCase()]
+            : [];
       let allLinks: { url: string; description: string }[] = [];
-      if ((effectiveLinkTerms as string[]).length > 0) {
+      if (effectiveLinkTerms.length > 0) {
         try {
-          const terms = (effectiveLinkTerms as string[]).map((t: string) => t.replace(/[%_\\]/g, '')).filter(Boolean);
-          const expanded = [...new Set(terms.flatMap((t: string) => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter((w: string) => w.length >= 2).slice(0, 6);
+          const terms = effectiveLinkTerms.map((t: string) => t.replace(/[%_\\]/g, '')).filter(Boolean);
+          const expanded = [...new Set(terms.flatMap((t: string) => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter((w: string) => w.length >= 1).slice(0, 6);
           const linkFilters = expanded.map((t: string) => `description.ilike.%${t}%`).join(',');
           const { data: matchedLinks } = await supabase
             .from('collective_links').select('url, description').or(linkFilters).limit(4);
@@ -806,15 +790,11 @@ Deno.serve(async (req) => {
             const seen = new Set<string>(memoryUrls);
             const ranked = (matchedLinks as any[])
               .filter((r: any) => r.url && typeof r.url === 'string')
-              .map((r: any) => {
-                const d = ((r.description as string) || '').toLowerCase();
-                // For short terms, require whole-word match in description
-                const score = lowerTerms.filter(t => {
-                  if (t.length <= 3) return new RegExp(`(?:^|\\s)${t}(?:\\s|$)`, 'i').test(d);
-                  return d.includes(t);
-                }).length;
-                return { url: r.url as string, description: (r.description as string) || '', score };
-              })
+              .map((r: any) => ({
+                url: r.url as string,
+                description: (r.description as string) || '',
+                score: lowerTerms.filter(t => ((r.description as string) || '').toLowerCase().includes(t)).length,
+              }))
               .filter(r => r.score > 0)
               .sort((a, b) => b.score - a.score)
               .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true; })
