@@ -33,10 +33,10 @@ function ShareIntentHandler({ session }: { session: Session | null }) {
 
   useEffect(() => {
     if (!hasShareIntent) return;
-    const text = shareIntent?.text?.trim() ?? shareIntent?.files?.[0]?.path ?? '';
+    // Prefer the clean extracted webUrl over raw text (avoids getting full webpage HTML)
+    const text = (shareIntent?.webUrl ?? shareIntent?.text)?.trim() ?? '';
     if (!text) return;
     resetShareIntent();
-    // Emit to chat screen; navigate there if user is logged in
     shareEvents.emit(text);
     if (session) router.navigate('/(tabs)/chat');
   }, [hasShareIntent, shareIntent]);
