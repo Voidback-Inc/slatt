@@ -13,7 +13,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.voidback.slatt",
-      "buildNumber": "6",
+      "buildNumber": "7",
       "version": "1.5.0",
       "usesAppleSignIn": true,
       "infoPlist": {

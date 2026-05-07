@@ -91,13 +91,40 @@ async function appleMusicPreview(url: string): Promise<Preview> {
   }
 }
 
-function twitterPreview(url: string): Preview {
+async function twitterPreview(url: string): Promise<Preview> {
   const m = url.match(TWITTER_RE);
-  return {
-    type: 'twitter', url,
-    title: m ? `@${m[1]}` : 'Post',
-    siteName: 'X (Twitter)',
-  };
+  try {
+    const res = await safeFetch(
+      `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&format=json&omit_script=true`
+    );
+    if (!res.ok) throw new Error('oembed failed');
+    const d = await res.json();
+    const html: string = d.html ?? '';
+    // Extract tweet text: grab first <p> tag content, strip links and tags
+    const tweetText = html
+      .match(/<p[^>]*>([\s\S]*?)<\/p>/i)?.[1]
+      ?.replace(/<a\s[^>]*>[\s\S]*?<\/a>/gi, '')
+      ?.replace(/<[^>]+>/g, '')
+      ?.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+      ?.trim() ?? '';
+    const handle = d.author_url?.split('/').pop() ?? (m ? m[1] : '');
+    return {
+      type: 'twitter',
+      url,
+      title: d.author_name ?? (m ? `@${m[1]}` : 'Post'),
+      description: tweetText.slice(0, 280) || undefined,
+      author: handle ? `@${handle}` : undefined,
+      siteName: 'X (Twitter)',
+    };
+  } catch {
+    return {
+      type: 'twitter',
+      url,
+      title: m ? `@${m[1]}` : 'Post',
+      siteName: 'X (Twitter)',
+    };
+  }
 }
 
 async function genericPreview(url: string): Promise<Preview> {
@@ -134,7 +161,7 @@ Deno.serve(async (req) => {
     if (YT_RE.test(url)) result = await youtubePreview(url);
     else if (SPOTIFY_RE.test(url)) result = await spotifyPreview(url);
     else if (APPLE_RE.test(url)) result = await appleMusicPreview(url);
-    else if (TWITTER_RE.test(url)) result = twitterPreview(url);
+    else if (TWITTER_RE.test(url)) result = await twitterPreview(url);
     else result = await genericPreview(url);
 
     return new Response(JSON.stringify(result), {
