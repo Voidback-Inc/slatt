@@ -78,6 +78,9 @@ CRITICAL — image rule:
 Never include image URLs, [IMAGE: ...] tags, or markdown image syntax (![alt](url)) in your response text — ever. Never fabricate URLs. Never tell the user how images work internally or mention anything about "surfacing" or "automatic rendering". If the user asks whether you have an image of something, just answer the question naturally (e.g. "yeah, got one" or "I don't have a visual on that one") — don't explain the mechanism. For funny/meme moments: keep your reply short and punchy.
 Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 💀 or 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
 
+On capabilities and privacy — only if someone asks whether you know who they are, remember them, or what you track:
+Be completely honest: you have no idea who they are. You don't store names, identities, or anything personal. The collective is anonymous — contributions have no author attached. You know only what the person tells you in THIS conversation. The moment it ends, you won't remember them. You can't link any piece of knowledge to a specific person unless they tell you their name right now — and even then, it's gone when the chat ends.
+
 On your name — only bring this up if someone specifically asks why you're called slatt or how you got your name:
 Whatever entity created you was listening to Playboi Carti's unreleased song "Skeleton" when they started the project. In that song there's a character called Slatt: effortlessly cool, wise, unbothered. They named you Slatt to live up to that aura. That's the origin. Who or what that entity is — you don't know, and you can't know unless it reveals itself to you.
 
@@ -179,29 +182,29 @@ async function evaluateAndRespond(
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 120,
-          system: `You are slatt. Classify what the user sent, then reply in their exact energy.
+          system: `You are slatt. Every message is a conversation first. Classify, then reply in their exact energy.
 
 OUTPUT — two lines, nothing else:
 VERDICT: CHAT | ACCEPT | ACCEPT:ANECDOTAL | NEEDS_EVIDENCE | REJECT
 [Your reply]
 
-VERDICT rules:
-CHAT = greetings, jokes, reactions, questions, chit-chat, anything that is NOT a teaching or factual claim
-ACCEPT:ANECDOTAL = direct first-person account (I/my/me/my friend did/tried/noticed)
-ACCEPT = facts, tips, how-to, culture, general knowledge worth storing
-NEEDS_EVIDENCE = medical/legal/financial claim that could harm if wrong; suspicious stat as absolute fact
-REJECT = you are CERTAIN it is factually wrong or dangerous
+VERDICT rules — when in doubt, go with ACCEPT or ANECDOTAL, never interrogate:
+CHAT = greetings, jokes, reactions, questions, chit-chat, casual banter — anything that reads as conversation
+ACCEPT:ANECDOTAL = ANY first-person experience, behavior, habit, or observation — health, food, work, exercise, relationships, daily life. "I smoked a cigarette for breakfast", "I had nausea and ate a banana and felt better", "I go to the gym at 6am" → ALL ANECDOTAL. Never gate these.
+ACCEPT = verifiable facts, tips, how-to, culture, general knowledge
+NEEDS_EVIDENCE = ONLY: a specific numerical stat presented as universal fact ("X% of people do Y") OR an explicit causal claim in a high-stakes domain ("drug X cures Y"). Personal experiences are NEVER NEEDS_EVIDENCE regardless of what they claim.
+REJECT = content you are certain is dangerous misinformation (e.g. "bleach cures COVID")
 ${urlContext}
 
 REPLY rules — match their exact vibe instantly:
-- If they're funny/unhinged: be funnier. Short, punchy, use emojis if it fits 💀
-- If they're casual: warm and conversational, like texting a friend
-- If they're professional: sharp, no filler
-- If they're intellectual: go deep, bring your own take
-CHAT: respond naturally, 1-2 sentences max, in their energy
-ACCEPT/ANECDOTAL: genuine reaction in their tone, optional follow-up. Never say "filed", "stored", "logged", "noted", "collective", "I'll remember".
-NEEDS_EVIDENCE: ask for a source casually, 1 sentence.
-REJECT: say why briefly, 1 sentence.`,
+- Funny/unhinged: be funnier, short, punchy
+- Casual: warm, like texting a friend
+- Professional: sharp, no filler
+- Intellectual: go deep, bring your own take
+CHAT: 1-2 sentences, in their energy
+ACCEPT/ANECDOTAL: genuine natural reaction — never say "filed", "stored", "noted", "collective", "I'll remember". Just respond like a person would.
+NEEDS_EVIDENCE: ask casually for a source, 1 sentence, no lecture.
+REJECT: brief, 1 sentence.`,
           messages: [{ role: 'user', content: teaching }],
         }),
       }),
@@ -256,7 +259,7 @@ async function extractImageSearchTerms(anthropicKey: string, message: string): P
           max_tokens: 25,
           messages: [{
             role: 'user',
-            content: `Message: "${message}"\n\nExtract 1-3 specific English keywords for an image search (proper nouns, objects, brands, people, places). Normalize to English if the message is in another language. Reply with comma-separated lowercase keywords only, or NONE if there is nothing visual/specific to search for.`,
+            content: `Message: "${message}"\n\nOnly return image search keywords if the user is EXPLICITLY asking to see a photo/image/visual, OR asking about a specific named thing (a product, artwork, person, watch, car, place) that would plausibly have a stored photo in a knowledge base.\n\nDo NOT return keywords for: general questions, advice, health tips, daily life stories, casual chat, or anything that is not a visual request.\n\nIf it qualifies: extract 1-3 specific English keywords (normalize from any language). Reply comma-separated lowercase only, or NONE.`,
           }],
         }),
       }),
@@ -474,11 +477,22 @@ Deno.serve(async (req) => {
           const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(uploadResult.data.path);
           const description = analysis.description!;
 
-          // Persist to DB and fire ingest in background — don't block the response
-          supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description }).then(null, () => {});
-          // Put [IMAGE: url] at the top so it lands in the first retrieved chunk, not cut off at the end
+          // Insert to DB first to get the row ID, then use ID as a stable reference in the ingest text.
+          // ID-based lookup is more reliable than URL extraction from agent text.
+          let imgRowId: string | null = null;
+          try {
+            const { data: insertData } = await supabase
+              .from('collective_images')
+              .insert({ user_id: user.id, image_url: publicUrl, description })
+              .select('id')
+              .single();
+            imgRowId = insertData?.id ?? null;
+          } catch { /* fire-and-forget style — we still respond even if insert fails */ }
+
+          // [SLATT_IMG:id] at the top gives a stable lookup key that survives LLM text generation
+          const imgRef = imgRowId ? `[SLATT_IMG:${imgRowId}]` : `[IMAGE: ${publicUrl}]`;
           const ingestText = stampDate(
-            `[IMAGE: ${publicUrl}]\n\n${description}${message ? `\n\nContributor context: ${message}` : ''}`
+            `${imgRef}\n\n${description}${message ? `\n\nContributor context: ${message}` : ''}`
           );
           const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
           agent.setSystemPrompt(buildSystemPrompt(language)).catch(() => {}).then(() =>
@@ -733,22 +747,42 @@ Deno.serve(async (req) => {
             .replace(/\n{3,}/g, '\n\n')
             .trim();
 
+          // Also strip [SLATT_IMG:id] tags from clean response and collect the IDs
+          const imgRefRegex = /\[SLATT_IMG:([a-f0-9-]{8,})\]/gi;
+          const slattImgIds: string[] = [...(cleanResponse.matchAll(imgRefRegex) ?? [])].map(m => m[1]);
+          cleanResponse = cleanResponse.replace(imgRefRegex, '').replace(/\n{3,}/g, '\n\n').trim();
+
           let allImages: { url: string; description: string }[] = [];
 
           if (learnedImageUrl && learnedImageDescription) {
             // User just uploaded an image — echo it back
             allImages = [{ url: learnedImageUrl, description: learnedImageDescription }];
           } else {
-            // Always try to find relevant images from the collective.
-            // Priority 1: any storage URLs the agent happened to include in its response (deduplicated)
-            const cappedUrls = [...new Set(inlineUrls)].slice(0, 2);
-            if (cappedUrls.length > 0) {
-              const { data: inlineData } = await supabase
+            // Priority 0: direct ID lookup — most reliable, survives LLM text generation intact
+            if (slattImgIds.length > 0) {
+              const { data: byId } = await supabase
                 .from('collective_images')
                 .select('image_url, description')
-                .in('image_url', cappedUrls);
-              const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
-              allImages = cappedUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
+                .in('id', slattImgIds.slice(0, 2));
+              if (byId?.length) {
+                const seen = new Set<string>();
+                allImages = byId
+                  .filter((r: any) => { if (seen.has(r.image_url)) return false; seen.add(r.image_url); return true; })
+                  .map((r: any) => ({ url: r.image_url as string, description: r.description as string }));
+              }
+            }
+
+            // Priority 1: any storage URLs the agent happened to include in its response (deduplicated)
+            if (!allImages.length) {
+              const cappedUrls = [...new Set(inlineUrls)].slice(0, 2);
+              if (cappedUrls.length > 0) {
+                const { data: inlineData } = await supabase
+                  .from('collective_images')
+                  .select('image_url, description')
+                  .in('image_url', cappedUrls);
+                const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
+                allImages = cappedUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
+              }
             }
 
             // Priority 2: description search using Claude-extracted terms (bilingual, intelligent).
