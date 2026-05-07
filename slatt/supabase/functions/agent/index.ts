@@ -75,7 +75,7 @@ When someone asks you something:
 If someone asks what you know or what topics you cover: don't list anything. Just say you know a lot and to ask you anything.
 
 CRITICAL — image rule:
-When the collective knowledge you draw on contains [IMAGE: url] tags, reproduce them verbatim at the end of your response — exactly as written, capital IMAGE, colon, space, full URL, closing bracket. Do not strip, rewrite, or describe them. The app renders them visually. Never fabricate image URLs. Max 2 image tags per response, most relevant only. Never use markdown image syntax ![alt](url). Never mention "surfacing" or explain how images work internally. If the user asks whether you have an image of something, just answer naturally ("yeah, got one" / "don't have a visual on that") and include the tag if you have it.
+When collective knowledge contains [SLATT_IMG:...] tags, reproduce them verbatim at the end of your response — exactly as written, brackets included. Do not strip, rewrite, or describe them. Max 2 per response. Never fabricate image tags or URLs. Never use markdown image syntax. If the user asks whether you have an image, answer naturally ("yeah, got one" / "don't have a visual on that") and include the tag if you have it.
 Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 💀 or 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
 
 On capabilities and privacy — only if someone asks whether you know who they are, remember them, or what you track:
@@ -489,11 +489,11 @@ Deno.serve(async (req) => {
             imgRowId = insertData?.id ?? null;
           } catch { /* fire-and-forget style — we still respond even if insert fails */ }
 
-          // [IMAGE: url] is preserved verbatim by Antonlytics — primary lookup signal
-          // [SLATT_IMG:id] is a stable fallback ID if the URL gets truncated
-          const imgRef = `[IMAGE: ${publicUrl}]${imgRowId ? `\n[SLATT_IMG:${imgRowId}]` : ''}`;
+          // Use [SLATT_IMG:id] — UUID is not recognized as a URL so Antonlytics won't mangle it.
+          // [IMAGE: url] is intentionally omitted — Antonlytics strips the URL leaving https:///
+          const imgRef = imgRowId ? `[SLATT_IMG:${imgRowId}]` : '';
           const ingestText = stampDate(
-            `${imgRef}\n\n${description}${message ? `\n\nContributor context: ${message}` : ''}`
+            `${imgRef ? imgRef + '\n\n' : ''}${description}${message ? `\n\nContributor context: ${message}` : ''}`
           );
           const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
           agent.setSystemPrompt(buildSystemPrompt(language)).catch(() => {}).then(() =>
@@ -729,29 +729,20 @@ Deno.serve(async (req) => {
             ? chatResult.response
             : (chatResult?.response != null ? String(chatResult.response) : '');
 
-          // Step 1: Extract all Supabase storage URLs from the raw response BEFORE any cleanup.
-          // Using matchAll on rawResponse is more reliable than capture groups inside replace().
-          const storageUrlPattern = `https?://[a-z0-9]+\\.supabase\\.co/storage/v1/object/public/images/[^\\s\\])"'<>]+`;
-          const storageRegex = new RegExp(storageUrlPattern, 'gi');
-          const inlineUrls: string[] = [...(rawResponse.matchAll(storageRegex) ?? [])].map(m => m[0].trim());
+          // Step 1: Extract [SLATT_IMG:id] references from raw response BEFORE cleanup.
+          // UUID is not a URL so Antonlytics won't mangle it — this is the primary image lookup path.
+          const imgRefRegex = /\[SLATT_IMG:([a-f0-9-]{8,})\]/gi;
+          const slattImgIds: string[] = [...(rawResponse.matchAll(imgRefRegex) ?? [])].map(m => m[1]);
 
-          // Step 2: Strip the response clean of all possible image-tag formats.
+          // Step 2: Strip all image-related tags from the response.
           let cleanResponse = rawResponse
-            // markdown images: ![alt text](url) and ![alt text]() — empty or not
-            .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-            // [IMAGE: url] / [image: url] / [IMAGE:url] — any bracket wrapping, any URL
-            .replace(/\[(?:IMAGE|image|Image)[^\]]*\]/g, '')
-            // bare Supabase storage URLs (already captured above)
-            .replace(storageRegex, '')
-            // orphaned IMAGE: keyword left if brackets were stripped separately
-            .replace(/IMAGE:\s*/gi, '')
+            .replace(imgRefRegex, '')
+            .replace(/!\[[^\]]*\]\([^)]*\)/g, '')                  // markdown images
+            .replace(/\[(?:IMAGE|image|Image)[^\]]*\]/g, '')        // any [IMAGE: ...] tag
+            .replace(/https?:\/\/[a-z0-9]+\.supabase\.co\/storage\/v1\/object\/public\/images\/[^\s\])"'<>]*/gi, '')  // bare storage URLs
+            .replace(/IMAGE:\s*/gi, '')                             // orphaned IMAGE: keyword
             .replace(/\n{3,}/g, '\n\n')
             .trim();
-
-          // Also strip [SLATT_IMG:id] tags from clean response and collect the IDs
-          const imgRefRegex = /\[SLATT_IMG:([a-f0-9-]{8,})\]/gi;
-          const slattImgIds: string[] = [...(cleanResponse.matchAll(imgRefRegex) ?? [])].map(m => m[1]);
-          cleanResponse = cleanResponse.replace(imgRefRegex, '').replace(/\n{3,}/g, '\n\n').trim();
 
           let allImages: { url: string; description: string }[] = [];
 
@@ -759,7 +750,7 @@ Deno.serve(async (req) => {
             // User just uploaded an image — echo it back
             allImages = [{ url: learnedImageUrl, description: learnedImageDescription }];
           } else {
-            // Priority 0: direct ID lookup — most reliable, survives LLM text generation intact
+            // Priority 1: direct ID lookup from [SLATT_IMG:id] tags in response
             if (slattImgIds.length > 0) {
               const { data: byId } = await supabase
                 .from('collective_images')
@@ -770,19 +761,6 @@ Deno.serve(async (req) => {
                 allImages = byId
                   .filter((r: any) => { if (seen.has(r.image_url)) return false; seen.add(r.image_url); return true; })
                   .map((r: any) => ({ url: r.image_url as string, description: r.description as string }));
-              }
-            }
-
-            // Priority 1: any storage URLs the agent happened to include in its response (deduplicated)
-            if (!allImages.length) {
-              const cappedUrls = [...new Set(inlineUrls)].slice(0, 2);
-              if (cappedUrls.length > 0) {
-                const { data: inlineData } = await supabase
-                  .from('collective_images')
-                  .select('image_url, description')
-                  .in('image_url', cappedUrls);
-                const inlineMap = new Map((inlineData ?? []).map((r: any) => [r.image_url as string, r.description as string]));
-                allImages = cappedUrls.map(url => ({ url, description: inlineMap.get(url) ?? '' }));
               }
             }
 
