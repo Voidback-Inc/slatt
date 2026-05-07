@@ -748,12 +748,13 @@ Deno.serve(async (req) => {
 
       const urlsWithContext: { url: string; score: number }[] = [];
       for (const entity of ((memoryResult as any).entities ?? [])) {
+        // Scoring uses lowercased strings — URL extraction uses original to preserve case-sensitive video IDs
         const name = ((entity.name || entity.external_id || '') as string).toLowerCase();
         const propsStr = JSON.stringify(entity.properties ?? {}).toLowerCase();
         const score = rankingTerms.filter((t: string) => name.includes(t) || propsStr.includes(t)).length;
-        const entityJson = JSON.stringify(entity).toLowerCase();
+        const entityJsonOriginal = JSON.stringify(entity);
         MEDIA_URL_RE.lastIndex = 0;
-        for (const m of (entityJson.matchAll(MEDIA_URL_RE) ?? [])) {
+        for (const m of (entityJsonOriginal.matchAll(MEDIA_URL_RE) ?? [])) {
           const url = m[0].replace(/[\\]+/g, '').replace(/["']+$/, '');
           if (url.length > 15 && !urlsWithContext.some(x => x.url === url)) {
             urlsWithContext.push({ url, score });
