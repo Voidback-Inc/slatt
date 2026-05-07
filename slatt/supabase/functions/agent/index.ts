@@ -731,19 +731,55 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Link lookup — Layer 1: extract URLs directly from Antonlytics memory entities/relationships
-      // This catches cases where a YouTube/Spotify URL is stored in the knowledge graph
-      // but the collective_links table lookup misses it.
+      // Link lookup — Layer 1: extract URLs from Antonlytics memory, ranked by relevance to query terms
       const MEDIA_URL_RE = /https?:\/\/(?:(?:www\.)?youtube\.com|youtu\.be|open\.spotify\.com|spotify\.com|soundcloud\.com|music\.apple\.com|tidal\.com|music\.youtube\.com|deezer\.com)[^\s"'\\,\]>)]+/gi;
-      const memJsonStr = JSON.stringify(memoryResult);
-      const memoryUrls: string[] = [];
-      for (const m of (memJsonStr.matchAll(MEDIA_URL_RE) ?? [])) {
-        const url = m[0].replace(/[\\]+/g, '').replace(/["']+$/, '');
-        if (url.length > 15 && !memoryUrls.includes(url)) memoryUrls.push(url);
+
+      // Scan per entity so we can rank by relevance
+      const queryTermsForRanking = [...new Set([
+        ...(linkTerms as string[]),
+        ...(contentTerms as string[]),
+        // Also add significant words from the raw message as fallback
+        ...message.trim().toLowerCase().split(/\s+/).filter((w: string) => w.length >= 3 && !STOP_WORDS.test(w)),
+      ])].map((t: string) => t.toLowerCase());
+
+      const urlsWithContext: { url: string; context: string }[] = [];
+      for (const entity of ((memoryResult as any).entities ?? [])) {
+        const entityJson = JSON.stringify(entity).toLowerCase();
+        MEDIA_URL_RE.lastIndex = 0;
+        for (const m of (entityJson.matchAll(MEDIA_URL_RE) ?? [])) {
+          const url = m[0].replace(/[\\]+/g, '').replace(/["']+$/, '');
+          if (url.length > 15 && !urlsWithContext.some(x => x.url === url)) {
+            urlsWithContext.push({ url, context: entityJson });
+          }
+        }
       }
 
+      // Rank: entities whose properties mention the query terms float to top
+      const memoryUrls: string[] = urlsWithContext
+        .map(x => ({
+          url: x.url,
+          score: queryTermsForRanking.filter(t => x.context.includes(t)).length,
+        }))
+        .sort((a, b) => b.score - a.score)
+        .map(x => x.url)
+        .slice(0, 5);
+
       // Link lookup — Layer 2: collective_links DB search using linkTerms (broad named-subject detection)
-      const effectiveLinkTerms = (linkTerms as string[]).length > 0 ? linkTerms : contentTerms;
+      // Short-message fallback: if the model returned nothing (e.g. "nn", "wsp") try the raw words
+      const STOP_WORDS = /^(the|a|an|is|it|in|on|at|to|of|and|or|but|for|with|from|this|that|these|those|what|who|how|when|where|why|just|so|do|did|does|i|me|my|you|your|we|ur)$/i;
+      const rawFallbackTerms: string[] = (
+        (linkTerms as string[]).length === 0 &&
+        (contentTerms as string[]).length === 0 &&
+        message.trim().length >= 2 &&
+        message.trim().length <= 25
+      )
+        ? message.trim().toLowerCase().split(/\s+/).filter((w: string) => w.length >= 2 && !STOP_WORDS.test(w)).slice(0, 3)
+        : [];
+      const effectiveLinkTerms = (linkTerms as string[]).length > 0
+        ? linkTerms
+        : (contentTerms as string[]).length > 0
+          ? contentTerms
+          : rawFallbackTerms;
       let allLinks: { url: string; description: string }[] = [];
       // Always run link lookup if we have link terms — don't let the agent's text suppress it
       if ((effectiveLinkTerms as string[]).length > 0) {
