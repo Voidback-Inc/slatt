@@ -16,6 +16,9 @@
       "buildNumber": "7",
       "version": "1.5.0",
       "usesAppleSignIn": true,
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.com.voidback.slatt"]
+      },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
