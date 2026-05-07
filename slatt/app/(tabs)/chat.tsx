@@ -769,7 +769,8 @@ export default function ChatScreen() {
     if (input.length > 2) setMode(detectMode(input));
   }, [input]);
 
-  const dailyLimit = profile?.tier === 'pro' ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT;
+  const isPro = profile?.tier === 'pro';
+  const dailyLimit = isPro ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT;
   const queriesLeft = profile
     ? Math.min(dailyLimit, Math.max(0, dailyLimit - (profile.queries_today ?? 0)))
     : null;
@@ -983,10 +984,10 @@ export default function ChatScreen() {
             {profile === null && (
               <View style={s.headerSkeleton} />
             )}
-            {queriesLeft !== null && (
-              profile?.tier === 'pro'
+            {profile !== null && (
+              isPro
                 ? <TouchableOpacity onPress={() => setShowPaywall(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}><ProBadge /></TouchableOpacity>
-                : <QueryRing left={queriesLeft} total={dailyLimit} onPress={() => setShowPaywall(true)} />
+                : <QueryRing left={queriesLeft ?? 0} total={dailyLimit} onPress={() => setShowPaywall(true)} />
             )}
             {messages.length > 0 && (
               <TouchableOpacity onPress={newChat} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>

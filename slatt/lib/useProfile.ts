@@ -31,5 +31,13 @@ export function useProfile() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Reload whenever the Supabase auth session changes (sign-in, token refresh, IAP sync)
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) load();
+    });
+    return () => subscription.unsubscribe();
+  }, [load]);
+
   return { profile, email, userId, reloadProfile: load };
 }

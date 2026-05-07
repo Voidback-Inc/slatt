@@ -43,7 +43,7 @@ export async function upsertConversation(conv: Conversation): Promise<void> {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from('conversations').upsert({
+    const { error } = await supabase.from('conversations').upsert({
       id: conv.id,
       user_id: user.id,
       title: conv.title,
@@ -51,7 +51,10 @@ export async function upsertConversation(conv: Conversation): Promise<void> {
       messages: conv.messages,
       updated_at: new Date().toISOString(),
     });
-  } catch {}
+    if (error) console.warn('[history] upsert failed:', error.message, error.code);
+  } catch (e) {
+    console.warn('[history] upsert error:', e);
+  }
 }
 
 export async function deleteConversation(id: string): Promise<void> {

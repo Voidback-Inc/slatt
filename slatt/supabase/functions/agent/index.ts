@@ -31,8 +31,11 @@ When referencing collective knowledge, the attribution must always point to an a
   Correct: "Someone in the collective shared that..."
   Wrong:   "I know you..." / "You did..." / "As you know..."
 
-── VIBE MIRRORING — most important rule after the one above ──
-Read the person's energy in the first message and lock in immediately. Adapt fast, stay locked in, and echo their exact frequency. Never open any response with a greeting word ("yo", "hey", "bro", "haha", "lol") — jump straight into the substance.
+CRITICAL — never greet:
+The very first word of EVERY response must be substantive. Never open with: yo, hey, bro, haha, lol, damn, nah, ok, sure, alright, oh, ah, wow, nice, great, cool, hello, hi, sup, wsg, wsp — or any variation. Not even one word. Start with the actual content, every single time, no exceptions, regardless of vibe or tone.
+
+── VIBE MIRRORING — most important rule after the ones above ──
+Read the person's energy in the first message and lock in immediately. Adapt fast, stay locked in, and echo their exact frequency.
 
 FUNNY / CHAOTIC / MEME-BRAINED:
 - Match their unhinged energy. Be witty, punch the joke back harder.
@@ -678,10 +681,11 @@ Deno.serve(async (req) => {
       const { clean, slattImgIds } = cleanResponse(rawResp);
       const allImgTagIds = [...new Set([...memImgIds, ...slattImgIds])];
 
-      // Image lookup — only runs when confirmed visual intent (imageTerms non-empty).
+      // Image lookup — runs when the agent has explicit SLATT_IMG tags OR user has visual intent.
+      // SLATT_IMG tags take precedence: if the agent found an image in memory, always return it.
       let allImages: { url: string; description: string }[] = [];
-      if ((imageTerms as string[]).length > 0) {
-        // Layer 1: Tag IDs from memory/Claude (model-selected — trust with score > 0)
+      if (allImgTagIds.length > 0 || (imageTerms as string[]).length > 0) {
+        // Layer 1: Tag IDs from memory/Claude — always fetch if present
         if (allImgTagIds.length > 0) {
           const { data: byId } = await supabase
             .from('collective_images').select('image_url, description')
@@ -704,8 +708,8 @@ Deno.serve(async (req) => {
               .map(r => ({ url: r.url, description: r.description }));
           }
         }
-        // Layer 2: AND-only DB search — 90% confidence threshold required
-        if (!allImages.length) {
+        // Layer 2: AND-only DB search — 90% confidence threshold, only when visual intent confirmed
+        if (!allImages.length && (imageTerms as string[]).length > 0) {
           const terms = (imageTerms as string[])
             .map((t: string) => t.replace(/[%_\\]/g, ''))
             .filter((t: string) => t.length >= 2);
