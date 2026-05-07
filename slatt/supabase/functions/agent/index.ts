@@ -4,13 +4,16 @@ import { Agent } from 'https://esm.sh/antonlytics@2.0.0';
 const FREE_DAILY_LIMIT = 30;
 const PRO_DAILY_LIMIT = 300;
 
-function buildSystemPrompt(language?: string): string {
+function buildSystemPrompt(language?: string, userId?: string): string {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const langLine = language && language !== 'English'
     ? `\n\nIMPORTANT: The user's app language is set to ${language}. Respond ONLY in ${language} regardless of what language the user writes in. Keep your tone and style, just use ${language}.`
     : '';
-  return `Today's date is ${dateStr}.${langLine}\n\n` + SYSTEM_PROMPT_BASE;
+  const userLine = userId
+    ? `\n\nThe user's anonymous system ID is: ${userId}. This is their only identifier — you do not know their name, face, or anything personal about them unless they explicitly tell you in this exact conversation.`
+    : '';
+  return `Today's date is ${dateStr}.${langLine}${userLine}\n\n` + SYSTEM_PROMPT_BASE;
 }
 
 function stampDate(text: string): string {
@@ -202,12 +205,11 @@ ${urlContext}`,
   }
 }
 
-// Single Haiku call that classifies both image and content intent simultaneously.
-// Returns { imageTerms, contentTerms } — one API call, two signals, zero cross-contamination.
+// Single Haiku call that classifies image, link, and content intent simultaneously.
 async function extractSearchTerms(
   anthropicKey: string,
   message: string,
-): Promise<{ imageTerms: string[]; contentTerms: string[] }> {
+): Promise<{ imageTerms: string[]; contentTerms: string[]; linkTerms: string[] }> {
   try {
     const res = await withTimeout(
       fetch('https://api.anthropic.com/v1/messages', {
@@ -219,30 +221,35 @@ async function extractSearchTerms(
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 60,
+          max_tokens: 80,
           messages: [{
             role: 'user',
-            content: `User message (any language): "${message}"\n\nReply in EXACTLY this format, two lines:\nIMAGE: <1-5 specific English keywords for the main object type + any distinguishing traits (brand, model, category). E.g. "hard drive, seagate, storage" or "sneakers, air jordan, nike". If asking about a physical thing even implicitly, fire. NONE only for music/audio/abstract/opinions.>\nCONTENT: <1-3 English keywords if the message mentions or is about a specific song, artist, album, track, video, film, show, or any named piece of media — even if they don't ask for a link. Also fire for explicit content/link requests. NONE only for non-media topics.>\n\nRules:\n- IMAGE fires for: "what hard drive is this?", "specs of that car", "what model sneaker", "tell me about that laptop", "what is this thing", "identify this" — anything about a concrete identifiable thing. Include category + any specific sub-terms you can infer.\n- IMAGE must be NONE for: music, audio, abstract concepts, math, general trivia, pure opinions\n- CONTENT fires for: "tell me about X song", "what do you think of X artist", "that Travis Scott track", "I love X album" — any named media mention, proactively\n- Translate non-English subject matter to English\n- Keywords are comma-separated lowercase`,
+            content: `User message (any language): "${message}"\n\nReply in EXACTLY this format, three lines:\nIMAGE: <1-5 specific English keywords for the main object type + any distinguishing traits (brand, model, category). E.g. "hard drive, seagate, storage" or "sneakers, air jordan, nike". If asking about a physical thing even implicitly, fire. NONE only for music/audio/abstract/opinions.>\nLINK: <1-3 English keywords if the message mentions or asks about any named thing that could have a stored URL: a song, artist, album, video, film, show, podcast, article, product, brand, event, person, place, or topic. Fire broadly — any named subject. NONE only for pure abstract concepts, math, code questions, or generic opinions with no named subject.>\nCONTENT: <same as LINK — 1-3 English keywords for any named media (song, artist, album, video, film, show, podcast). NONE for non-media.>\n\nRules:\n- IMAGE fires for anything about a concrete identifiable physical thing. Include category + specific sub-terms.\n- IMAGE must be NONE for: music, audio, abstract concepts, math, general trivia, pure opinions\n- LINK fires very broadly: a person's name, a song title, a brand, a news topic, a place — anything with a possible URL\n- CONTENT fires for named media items specifically (more narrow than LINK)\n- Translate non-English subject matter to English\n- Keywords are comma-separated lowercase`,
           }],
         }),
       }),
       5000,
     );
-    if (!res.ok) return { imageTerms: [], contentTerms: [] };
+    if (!res.ok) return { imageTerms: [], contentTerms: [], linkTerms: [] };
     const data = await res.json();
     const text: string = (data.content?.[0]?.text ?? '').trim();
 
-    const parseTerms = (line: string): string[] => {
-      const val = line.replace(/^(IMAGE|CONTENT):\s*/i, '').trim();
+    const parseTerms = (line: string, prefix: string): string[] => {
+      const val = line.replace(new RegExp(`^${prefix}:\\s*`, 'i'), '').trim();
       if (!val || val.toUpperCase() === 'NONE') return [];
-      return val.split(',').map(t => t.trim().toLowerCase()).filter(t => t.length >= 2).slice(0, 5);
+      return val.split(',').map((t: string) => t.trim().toLowerCase()).filter((t: string) => t.length >= 2).slice(0, 5);
     };
 
-    const imgLine = text.split('\n').find(l => /^IMAGE:/i.test(l)) ?? '';
-    const cntLine = text.split('\n').find(l => /^CONTENT:/i.test(l)) ?? '';
-    return { imageTerms: parseTerms(imgLine), contentTerms: parseTerms(cntLine) };
+    const imgLine = text.split('\n').find((l: string) => /^IMAGE:/i.test(l)) ?? '';
+    const lnkLine = text.split('\n').find((l: string) => /^LINK:/i.test(l)) ?? '';
+    const cntLine = text.split('\n').find((l: string) => /^CONTENT:/i.test(l)) ?? '';
+    return {
+      imageTerms: parseTerms(imgLine, 'IMAGE'),
+      linkTerms: parseTerms(lnkLine, 'LINK'),
+      contentTerms: parseTerms(cntLine, 'CONTENT'),
+    };
   } catch {
-    return { imageTerms: [], contentTerms: [] };
+    return { imageTerms: [], contentTerms: [], linkTerms: [] };
   }
 }
 
@@ -310,7 +317,6 @@ async function generateWithMemory(
   message: string,
   history: HistoryMessage[],
   memory: { entities: any[]; relationships: any[] },
-  isPro = false,
 ): Promise<{ response: string; memImgIds: string[] }> {
   // Scan raw memory JSON for any SLATT_IMG IDs stored in entity properties
   const memJson = JSON.stringify(memory);
@@ -351,8 +357,8 @@ async function generateWithMemory(
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          model: isPro ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
-          max_tokens: isPro ? 1500 : 1024,
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1024,
           system: systemPrompt + contextBlock,
           messages: msgs,
         }),
@@ -394,8 +400,8 @@ function cleanResponse(raw: string): { clean: string; slattImgIds: string[] } {
   return { clean, slattImgIds };
 }
 
-// Only suppress images when the agent is explicitly saying it has no images — not on any generic "don't have" phrase
-const DECLINE_RE = /\b(no (images?|photos?|pictures?|visuals?)|don'?t have (any |an? )?(images?|photos?|pictures?|visuals?)|didn'?t find (any )?(images?|photos?|pictures?)|couldn'?t find (any )?(images?|photos?|pictures?)|no visual(s)? (on|for|of)|nothing visual)\b/i;
+const DECLINE_IMAGE_RE = /\b(no (images?|photos?|pictures?|visuals?)|don'?t have (any |an? )?(images?|photos?|pictures?|visuals?)|didn'?t find (any )?(images?|photos?|pictures?)|couldn'?t find (any )?(images?|photos?|pictures?)|no visual(s)? (on|for|of)|nothing visual)\b/i;
+const DECLINE_LINK_RE = /\b(no (links?|urls?|sources?|references?)|don'?t have (any |a )?(links?|urls?|sources?|references?)|didn'?t find (any )?(links?|urls?)|couldn'?t find (any )?(links?|urls?)|no link(s)? (for|to|on|about))\b/i;
 const CORRECTION_RE = /\b(no[,.]?\s+(it'?s|its|that'?s|that is)|actually[,.]?\s+(it'?s|its|that'?s|that is|that was)|nah[,.]?\s+(it'?s|its)|it'?s\s+(actually|really)|that'?s\s+(actually|really)|wait[,.]?\s+(it'?s|its|that'?s))\b/i;
 
 Deno.serve(async (req) => {
@@ -450,7 +456,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { message: rawMessage, history = [], imageBase64, imageMimeType, language } = await req.json();
+    const { message: rawMessage, history = [], imageBase64, imageMimeType, language, userId: clientUserId } = await req.json();
     const message: string = rawMessage || '';
     if (!message && !imageBase64) {
       return new Response(JSON.stringify({ error: 'Missing message' }), { status: 400, headers: cors });
@@ -484,7 +490,7 @@ Deno.serve(async (req) => {
         const dupAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
         const dupMemory = await withTimeout(dupAgent.getMemory(chatMessage), 8000).catch(() => ({ entities: [], relationships: [] }));
         const { response: rawResp } = ANTHROPIC_API_KEY
-          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), chatMessage, history, dupMemory as any, profile.tier === 'pro')
+          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language, user.id), chatMessage, history, dupMemory as any)
           : { response: "That image is already in the collective." };
         const { clean } = cleanResponse(rawResp);
         body = {
@@ -562,16 +568,16 @@ Deno.serve(async (req) => {
         ]);
 
         const { response: rawResp, memImgIds: imgMemIds } = ANTHROPIC_API_KEY
-          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), chatMessage, history, imgMemory as any, profile.tier === 'pro')
+          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language, user.id), chatMessage, history, imgMemory as any)
           : { response: analysis.ack, memImgIds: [] as string[] };
         const { clean, slattImgIds } = cleanResponse(rawResp);
         const allImgTagIds = [...new Set([...imgMemIds, ...slattImgIds])];
-        const declinesMedia = DECLINE_RE.test(clean);
+        const declinesImages = DECLINE_IMAGE_RE.test(clean);
 
         let allImages: { url: string; description: string }[] = [];
         if (learnedImageUrl && learnedImageDescription) {
           allImages = [{ url: learnedImageUrl, description: learnedImageDescription }];
-        } else if (!declinesMedia) {
+        } else if (!declinesImages) {
           if (allImgTagIds.length > 0) {
             const { data: byId } = await supabase
               .from('collective_images').select('image_url, description')
@@ -588,30 +594,21 @@ Deno.serve(async (req) => {
             const terms = (imgSearchTerms as string[]).map((t: string) => t.replace(/[%_\\]/g, '')).filter((t: string) => t.length >= 2);
             if (terms.length > 0) {
               const lowerTerms = terms.map((t: string) => t.toLowerCase());
-              let matched: any[] | null = null;
-              if (terms.length >= 2) {
-                let andQ = supabase.from('collective_images').select('image_url, description');
-                for (const term of terms.slice(0, 3)) {
-                  andQ = (andQ as any).ilike('description', `%${term}%`);
-                }
-                const { data: andData } = await (andQ as any).limit(5);
-                if ((andData as any[])?.length) matched = andData as any[];
+              const minScore = Math.max(1, Math.ceil(terms.length * 0.9));
+              let andQ = supabase.from('collective_images').select('image_url, description');
+              for (const term of terms.slice(0, 4)) {
+                andQ = (andQ as any).ilike('description', `%${term}%`);
               }
-              if (!matched) {
-                const expanded = [...new Set(terms.flatMap((t: string) => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter((w: string) => w.length >= 2).slice(0, 6);
-                const orFilters = expanded.map((t: string) => `description.ilike.%${t}%`).join(',');
-                const { data: orData } = await supabase.from('collective_images').select('image_url, description').or(orFilters).limit(8);
-                if ((orData as any[])?.length) matched = orData as any[];
-              }
-              if (matched?.length) {
-                const ranked = (matched as any[])
+              const { data: andData } = await (andQ as any).limit(5);
+              if ((andData as any[])?.length) {
+                const ranked = (andData as any[])
                   .filter((r: any) => r.image_url && typeof r.image_url === 'string')
                   .map((r: any) => ({
                     url: r.image_url as string,
                     description: (r.description as string) || '',
                     score: lowerTerms.filter(t => ((r.description as string) || '').toLowerCase().includes(t)).length,
                   }))
-                  .filter(r => r.score > 0)
+                  .filter(r => r.score >= minScore)
                   .sort((a, b) => b.score - a.score);
                 const seen = new Set<string>();
                 allImages = ranked
@@ -657,24 +654,24 @@ Deno.serve(async (req) => {
             : Promise.resolve({ verdict: 'ACCEPT' as EvalVerdict, response: '' }),
         ANTHROPIC_API_KEY
           ? extractSearchTerms(ANTHROPIC_API_KEY, message)
-          : Promise.resolve({ imageTerms: [] as string[], contentTerms: [] as string[] }),
+          : Promise.resolve({ imageTerms: [] as string[], contentTerms: [] as string[], linkTerms: [] as string[] }),
       ]);
-      const { imageTerms, contentTerms } = searchTerms as { imageTerms: string[]; contentTerms: string[] };
+      const { imageTerms, contentTerms, linkTerms } = searchTerms as { imageTerms: string[]; contentTerms: string[]; linkTerms: string[] };
 
       // Claude generates the response with memory context — reliable system prompt following + SLATT_IMG tags
       const { response: rawResp, memImgIds } = ANTHROPIC_API_KEY
-        ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), message, history, memoryResult as any, profile.tier === 'pro')
+        ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language, user.id), message, history, memoryResult as any)
         : { response: '', memImgIds: [] as string[] };
       const { clean, slattImgIds } = cleanResponse(rawResp);
       const allImgTagIds = [...new Set([...memImgIds, ...slattImgIds])];
-      const declinesMedia = DECLINE_RE.test(clean);
+      const declinesImages = DECLINE_IMAGE_RE.test(clean);
+      const declinesLinks = DECLINE_LINK_RE.test(clean);
 
       // Image lookup — only runs when confirmed visual intent (imageTerms non-empty).
-      // No response-text fallback — avoids false positives from generic word matching.
       const hasImageIntent = (imageTerms as string[]).length > 0;
       let allImages: { url: string; description: string }[] = [];
-      if (!declinesMedia && hasImageIntent) {
-        // Layer 1: Tag IDs from memory/Claude (most precise — user asked about something already stored)
+      if (!declinesImages && hasImageIntent) {
+        // Layer 1: Tag IDs from memory/Claude (model-selected — trust with score > 0)
         if (allImgTagIds.length > 0) {
           const { data: byId } = await supabase
             .from('collective_images').select('image_url, description')
@@ -682,7 +679,6 @@ Deno.serve(async (req) => {
           if (byId?.length) {
             const lowerTerms = (imageTerms as string[]).map((t: string) => t.toLowerCase());
             const seen = new Set<string>();
-            // Rank by how many imageTerms match the description
             const ranked = byId
               .filter((r: any) => r.image_url && typeof r.image_url === 'string')
               .map((r: any) => ({
@@ -690,6 +686,7 @@ Deno.serve(async (req) => {
                 description: (r.description as string) || '',
                 score: lowerTerms.filter(t => ((r.description as string) || '').toLowerCase().includes(t)).length,
               }))
+              .filter(r => r.score > 0)
               .sort((a, b) => b.score - a.score);
             allImages = ranked
               .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true; })
@@ -697,41 +694,28 @@ Deno.serve(async (req) => {
               .map(r => ({ url: r.url, description: r.description }));
           }
         }
-        // Layer 2: imageTerms DB search — AND-first for precision, OR fallback for recall
+        // Layer 2: AND-only DB search — 90% confidence threshold required
         if (!allImages.length) {
           const terms = (imageTerms as string[])
             .map((t: string) => t.replace(/[%_\\]/g, ''))
             .filter((t: string) => t.length >= 2);
           if (terms.length > 0) {
             const lowerTerms = terms.map((t: string) => t.toLowerCase());
-            let matched: any[] | null = null;
-            // AND search: all terms must appear in description (high precision)
-            if (terms.length >= 2) {
-              let andQ = supabase.from('collective_images').select('image_url, description');
-              for (const term of terms.slice(0, 3)) {
-                andQ = (andQ as any).ilike('description', `%${term}%`);
-              }
-              const { data: andData } = await (andQ as any).limit(5);
-              if ((andData as any[])?.length) matched = andData as any[];
+            const minScore = Math.max(1, Math.ceil(terms.length * 0.9));
+            let andQ = supabase.from('collective_images').select('image_url, description');
+            for (const term of terms.slice(0, 4)) {
+              andQ = (andQ as any).ilike('description', `%${term}%`);
             }
-            // OR fallback if AND found nothing
-            if (!matched) {
-              const expanded = [...new Set(terms.flatMap((t: string) => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter((w: string) => w.length >= 2).slice(0, 6);
-              const orFilters = expanded.map((t: string) => `description.ilike.%${t}%`).join(',');
-              const { data: orData } = await supabase
-                .from('collective_images').select('image_url, description').or(orFilters).limit(10);
-              if ((orData as any[])?.length) matched = orData as any[];
-            }
-            if (matched?.length) {
-              // Rank by relevance: more matching terms = better match
-              const ranked = (matched as any[])
+            const { data: andData } = await (andQ as any).limit(5);
+            if ((andData as any[])?.length) {
+              const ranked = (andData as any[])
                 .filter((r: any) => r.image_url && typeof r.image_url === 'string')
                 .map((r: any) => ({
                   url: r.image_url as string,
                   description: (r.description as string) || '',
                   score: lowerTerms.filter(t => ((r.description as string) || '').toLowerCase().includes(t)).length,
                 }))
-                .filter(r => r.score > 0)
+                .filter(r => r.score >= minScore)
                 .sort((a, b) => b.score - a.score);
               const seen = new Set<string>();
               allImages = ranked
@@ -743,21 +727,32 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Link lookup — uses contentTerms only (music, articles, videos, etc.)
+      // Link lookup — uses linkTerms (broad named-subject detection)
+      const effectiveLinkTerms = (linkTerms as string[]).length > 0 ? linkTerms : contentTerms;
       let allLinks: { url: string; description: string }[] = [];
-      if (!declinesMedia && (contentTerms as string[]).length > 0) {
+      if (!declinesLinks && (effectiveLinkTerms as string[]).length > 0) {
         try {
-          const terms = (contentTerms as string[]).map((t: string) => t.replace(/[%_\\]/g, '')).filter(Boolean);
-          const expanded = [...new Set(terms.flatMap(t => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter(w => w.length >= 2).slice(0, 6);
+          const terms = (effectiveLinkTerms as string[]).map((t: string) => t.replace(/[%_\\]/g, '')).filter(Boolean);
+          const expanded = [...new Set(terms.flatMap((t: string) => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter((w: string) => w.length >= 2).slice(0, 6);
           const linkFilters = expanded.map((t: string) => `description.ilike.%${t}%`).join(',');
           const { data: matchedLinks } = await supabase
-            .from('collective_links').select('url, description').or(linkFilters).limit(2);
+            .from('collective_links').select('url, description').or(linkFilters).limit(3);
           if (matchedLinks?.length) {
+            const lowerTerms = terms.map((t: string) => t.toLowerCase());
             const seen = new Set<string>();
+            // Rank by how many terms match the description
             allLinks = (matchedLinks as any[])
               .filter((r: any) => r.url && typeof r.url === 'string')
-              .filter((r: any) => { if (seen.has(r.url)) return false; seen.add(r.url); return true; })
-              .map((r: any) => ({ url: r.url as string, description: (r.description as string) || '' }));
+              .map((r: any) => ({
+                url: r.url as string,
+                description: (r.description as string) || '',
+                score: lowerTerms.filter(t => ((r.description as string) || '').toLowerCase().includes(t)).length,
+              }))
+              .filter(r => r.score > 0)
+              .sort((a, b) => b.score - a.score)
+              .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true; })
+              .slice(0, 2)
+              .map(r => ({ url: r.url, description: r.description }));
           }
         } catch { }
       }

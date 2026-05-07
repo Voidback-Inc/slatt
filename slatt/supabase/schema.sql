@@ -78,6 +78,45 @@ alter table public.collective_images
 create index if not exists collective_images_fts_idx
   on public.collective_images using gin(fts);
 
+-- ── Collective links table (YouTube, Spotify, Twitter, Apple Music, generic) ──
+create table if not exists public.collective_links (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid references auth.users(id) on delete cascade not null,
+  url          text not null,
+  description  text not null default '',
+  created_at   timestamptz default now()
+);
+
+alter table public.collective_links enable row level security;
+
+create policy "Anyone can read collective links"
+  on public.collective_links for select
+  using (true);
+
+create policy "Users can insert own links"
+  on public.collective_links for insert
+  with check (auth.uid() = user_id);
+
+-- ── Conversations table (chat history synced to DB) ──────────────────────────
+create table if not exists public.conversations (
+  id text primary key,
+  user_id uuid references auth.users on delete cascade not null,
+  title text not null default '',
+  created_at bigint not null,
+  messages jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.conversations enable row level security;
+
+create policy "Users can manage their own conversations"
+  on public.conversations for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create index if not exists conversations_user_id_idx
+  on public.conversations(user_id, created_at desc);
+
 -- Edge function secrets to set in Supabase dashboard → Settings → Edge Functions:
 --   ANTONLYTICS_API_KEY      your Antonlytics API key
 --   ANTONLYTICS_PROJECT_ID   your shared Antonlytics project ID

@@ -545,10 +545,11 @@ const PRO_FEATURES = [
 ];
 
 function PaywallModal({
-  visible, queriesLeft, onClose, onUpgrade, checkoutLoading,
+  visible, queriesLeft, dailyLimit, onClose, onUpgrade, checkoutLoading,
 }: {
   visible: boolean;
   queriesLeft: number;
+  dailyLimit: number;
   onClose: () => void;
   onUpgrade: (plan: 'monthly' | 'annual') => void;
   checkoutLoading: 'monthly' | 'annual' | null;
@@ -564,8 +565,8 @@ function PaywallModal({
           <Text style={pw.title}>slatt Pro</Text>
           <Text style={pw.sub}>
             {queriesLeft === 0
-              ? `You've used all ${FREE_DAILY_LIMIT} free daily queries.`
-              : `${queriesLeft} of ${FREE_DAILY_LIMIT} free queries left today.`}
+              ? `You've used all ${dailyLimit} daily queries.`
+              : `${queriesLeft} of ${dailyLimit} queries left today.`}
             {' '}Upgrade for unlimited access.
           </Text>
 
@@ -743,13 +744,14 @@ export default function ChatScreen() {
   }, [reloadProfile]);
 
   useFocusEffect(useCallback(() => {
+    reloadProfile();
     const conv = consumePendingResume();
     if (conv) {
       const resumed: Message[] = conv.messages.map(m => ({ ...m, isError: false }));
       setMessages(resumed);
       convIdRef.current = conv.id;
     }
-  }, []));
+  }, [reloadProfile]));
 
   useEffect(() => {
     const show = Keyboard.addListener(
@@ -784,7 +786,12 @@ export default function ChatScreen() {
       createdAt: parseInt(convIdRef.current.replace('conv-', ''), 10),
       messages: msgs
         .filter(m => !m.isError && !m.isPending)
-        .map(({ id, role, content, mode: m }) => ({ id, role, content, mode: m })),
+        .map(({ id, role, content, mode: m, imageUri, images, links }) => ({
+          id, role, content, mode: m,
+          ...(imageUri ? { imageUri } : {}),
+          ...(images?.length ? { images } : {}),
+          ...(links?.length ? { links } : {}),
+        })),
     }).catch(() => {});
   };
 
@@ -855,6 +862,7 @@ export default function ChatScreen() {
             message: messageForAgent || (capturedImage ? '(image)' : ''),
             history,
             language: getLangName(),
+            userId: session?.user?.id,
             ...(capturedImage ? {
               imageBase64: capturedImage.base64,
               imageMimeType: capturedImage.mimeType,
@@ -1186,6 +1194,7 @@ export default function ChatScreen() {
       <PaywallModal
         visible={showPaywall}
         queriesLeft={queriesLeft ?? 0}
+        dailyLimit={dailyLimit}
         onClose={() => setShowPaywall(false)}
         onUpgrade={handleUpgrade}
         checkoutLoading={checkoutLoading}

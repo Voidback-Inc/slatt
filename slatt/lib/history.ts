@@ -1,13 +1,13 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const KEY = 'slatt_convs_v1';
-const MAX = 100;
+import { supabase } from './supabase';
 
 export type StoredMessage = {
   id: string;
   role: 'user' | 'agent';
   content: string;
   mode: 'teach' | 'ask';
+  imageUri?: string;
+  images?: { url: string; description: string }[];
+  links?: { url: string; description: string }[];
 };
 
 export type Conversation = {
@@ -17,40 +17,55 @@ export type Conversation = {
   messages: StoredMessage[];
 };
 
-async function readAll(): Promise<Conversation[]> {
+export async function loadConversations(): Promise<Conversation[]> {
   try {
-    const s = await AsyncStorage.getItem(KEY);
-    return s ? JSON.parse(s) : [];
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    const { data } = await supabase
+      .from('conversations')
+      .select('id, title, created_at, messages')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (!data) return [];
+    return data.map((row: any) => ({
+      id: row.id as string,
+      title: row.title as string,
+      createdAt: row.created_at as number,
+      messages: (row.messages ?? []) as StoredMessage[],
+    }));
   } catch {
     return [];
   }
 }
 
-async function persist(convs: Conversation[]): Promise<void> {
+export async function upsertConversation(conv: Conversation): Promise<void> {
   try {
-    await AsyncStorage.setItem(KEY, JSON.stringify(convs));
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('conversations').upsert({
+      id: conv.id,
+      user_id: user.id,
+      title: conv.title,
+      created_at: conv.createdAt,
+      messages: conv.messages,
+      updated_at: new Date().toISOString(),
+    });
   } catch {}
 }
 
-export async function loadConversations(): Promise<Conversation[]> {
-  const all = await readAll();
-  return all.sort((a, b) => b.createdAt - a.createdAt);
-}
-
-export async function upsertConversation(conv: Conversation): Promise<void> {
-  const all = await readAll();
-  const i = all.findIndex(c => c.id === conv.id);
-  if (i >= 0) all[i] = conv; else all.unshift(conv);
-  await persist(all.slice(0, MAX));
-}
-
 export async function deleteConversation(id: string): Promise<void> {
-  const all = await readAll();
-  await persist(all.filter(c => c.id !== id));
+  try {
+    await supabase.from('conversations').delete().eq('id', id);
+  } catch {}
 }
 
 export async function clearHistory(): Promise<void> {
-  await AsyncStorage.removeItem(KEY);
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('conversations').delete().eq('user_id', user.id);
+  } catch {}
 }
 
 // ── In-memory pending resume (history → chat) ─────────────────────────────────

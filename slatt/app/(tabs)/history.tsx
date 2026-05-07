@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import React from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView,
   StyleSheet, Alert, Modal, Share, Animated,
-  Image, Linking, Dimensions,
+  Image, Linking, Dimensions, Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -98,6 +99,64 @@ const sk = StyleSheet.create({
   line2: { height: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 5, width: '85%' },
   line3: { height: 9, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 4, width: '40%' },
 });
+
+// ── Markdown renderer ─────────────────────────────────────────────────────────
+
+function parseInline(text: string, baseStyle: object): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  const regex = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|https?:\/\/\S+)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const raw = m[0];
+    if (raw.startsWith('**')) {
+      parts.push(<Text key={key++} style={[baseStyle, { fontWeight: '800', color: '#fff' }]}>{raw.slice(2, -2)}</Text>);
+    } else if (raw.startsWith('*')) {
+      parts.push(<Text key={key++} style={[baseStyle, { fontStyle: 'italic' }]}>{raw.slice(1, -1)}</Text>);
+    } else if (raw.startsWith('`')) {
+      parts.push(
+        <Text key={key++} style={[baseStyle, { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13, backgroundColor: 'rgba(255,255,255,0.07)', color: '#a8ff78' }]}>
+          {raw.slice(1, -1)}
+        </Text>
+      );
+    } else {
+      const url = raw.replace(/[.,;:!?)'"\]]+$/, '');
+      const trailing = raw.slice(url.length);
+      parts.push(
+        <Text key={key++} style={[baseStyle, { color: '#1D9BF0', textDecorationLine: 'underline' }]} onPress={() => Linking.openURL(url)}>
+          {url}
+        </Text>
+      );
+      if (trailing) parts.push(trailing);
+    }
+    last = m.index + raw.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+function MarkdownText({ text, style }: { text: string; style: object }) {
+  const lines = text.split('\n');
+  const nodes: React.ReactNode[] = [];
+  lines.forEach((line, i) => {
+    if (!line.trim()) {
+      nodes.push(<View key={`sp-${i}`} style={{ height: 6 }} />);
+      return;
+    }
+    const isBullet = /^[-•*]\s/.test(line);
+    const content = isBullet ? line.replace(/^[-•*]\s+/, '') : line;
+    const inline = parseInline(content, style);
+    nodes.push(
+      <View key={i} style={isBullet ? { flexDirection: 'row', gap: 6 } : undefined}>
+        {isBullet && <Text style={[style, { marginTop: 1 }]}>•</Text>}
+        <Text style={[style, isBullet && { flex: 1 }]}>{inline}</Text>
+      </View>
+    );
+  });
+  return <View style={{ gap: 2 }}>{nodes}</View>;
+}
 
 // ── Link preview ──────────────────────────────────────────────────────────────
 
@@ -238,9 +297,9 @@ function ConversationModal({
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={md.list} showsVerticalScrollIndicator={false}>
           {conv.messages.map(msg => {
-            const previewUrl = extractFirstPreviewURL(msg.content);
-            const displayContent = previewUrl
-              ? msg.content.replace(previewUrl, '').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim()
+            const inlinePreviewUrl = !msg.links?.length ? extractFirstPreviewURL(msg.content) : null;
+            const displayContent = inlinePreviewUrl
+              ? msg.content.replace(inlinePreviewUrl, '').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim()
               : msg.content;
             return msg.role === 'user' ? (
               <View key={msg.id}>
@@ -251,10 +310,15 @@ function ConversationModal({
                   style={md.userWrap}
                 >
                   <LinearGradient colors={GRAD_USER} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={md.userBubble}>
-                    {!!displayContent && <Text style={md.userText}>{displayContent}</Text>}
+                    {msg.imageUri && (
+                      <Image source={{ uri: msg.imageUri }} style={md.msgImage} resizeMode="cover" />
+                    )}
+                    {!!displayContent && msg.content !== '📷 Image' && (
+                      <Text style={md.userText}>{displayContent}</Text>
+                    )}
                   </LinearGradient>
                 </TouchableOpacity>
-                {previewUrl && <View style={md.cardWrap}><LinkPreviewCard url={previewUrl} /></View>}
+                {inlinePreviewUrl && <View style={md.cardWrap}><LinkPreviewCard url={inlinePreviewUrl} /></View>}
               </View>
             ) : (
               <View key={msg.id}>
@@ -265,9 +329,26 @@ function ConversationModal({
                   style={md.agentBubble}
                 >
                   <Text style={md.agentLabel}>slatt</Text>
-                  {!!displayContent && <Text style={md.agentText}>{displayContent}</Text>}
+                  {!!displayContent && (
+                    <MarkdownText text={displayContent} style={md.agentText} />
+                  )}
                 </TouchableOpacity>
-                {previewUrl && <View style={md.cardWrap}><LinkPreviewCard url={previewUrl} /></View>}
+                {msg.images && msg.images.length > 0 && (
+                  <View style={md.imagesWrap}>
+                    {msg.images.map((img, i) => (
+                      <TouchableOpacity key={i} onPress={() => Linking.openURL(img.url)} activeOpacity={0.85} style={md.imgCard}>
+                        <Image source={{ uri: img.url }} style={md.imgThumb} resizeMode="cover" />
+                        {!!img.description && (
+                          <Text style={md.imgCaption} numberOfLines={2}>{img.description}</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                {msg.links && msg.links.length > 0 && msg.links.map((link, i) => (
+                  <View key={i} style={md.cardWrap}><LinkPreviewCard url={link.url} /></View>
+                ))}
+                {inlinePreviewUrl && <View style={md.cardWrap}><LinkPreviewCard url={inlinePreviewUrl} /></View>}
               </View>
             );
           })}
@@ -312,7 +393,17 @@ const md = StyleSheet.create({
   },
   agentLabel: { color: 'rgba(255,255,255,0.18)', fontSize: 9, fontWeight: '800', letterSpacing: 1.5, marginBottom: 7 },
   agentText: { color: 'rgba(255,255,255,0.88)', fontSize: 15, lineHeight: 23 },
-  cardWrap: { alignSelf: 'flex-start', paddingLeft: 0 },
+  cardWrap: { alignSelf: 'flex-start', paddingLeft: 0, width: '100%' },
+  msgImage: { width: '100%', height: 180, borderRadius: 12, marginBottom: 6 },
+  imagesWrap: { gap: 8, marginTop: 6 },
+  imgCard: {
+    borderRadius: 14, overflow: 'hidden',
+    backgroundColor: '#111',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
+    maxWidth: '88%',
+  },
+  imgThumb: { width: '100%', height: 160 },
+  imgCaption: { color: 'rgba(255,255,255,0.55)', fontSize: 11, lineHeight: 16, padding: 10, paddingTop: 7 },
   footer: {
     paddingHorizontal: 16, paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.07)',
