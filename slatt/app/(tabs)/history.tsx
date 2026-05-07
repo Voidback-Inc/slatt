@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView,
   StyleSheet, Alert, Modal, Share, Animated,
+  Image, Linking, Dimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -10,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { loadConversations, deleteConversation, clearHistory, setPendingResume, type Conversation } from '@/lib/history';
 import { supabase } from '@/lib/supabase';
 import { FREE_DAILY_LIMIT } from '@/lib/constants';
-import { t } from '@/lib/i18n';
+import { type Strings } from '@/lib/i18n';
 import { useLanguage } from '@/lib/useLanguage';
 import type { Profile } from '@/lib/supabase';
 
@@ -28,7 +29,9 @@ const T = {
 
 const GRAD_USER: [string, string] = ['#1D9BF0', '#8B5CF6'];
 
-function dayLabel(ts: number): string {
+type TFn = (key: keyof Strings) => string;
+
+function dayLabel(ts: number, t: TFn): string {
   const d = new Date(ts);
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -43,10 +46,10 @@ function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-function groupConversations(convs: Conversation[]): { label: string; items: Conversation[] }[] {
+function groupConversations(convs: Conversation[], t: TFn): { label: string; items: Conversation[] }[] {
   const map = new Map<string, Conversation[]>();
   for (const conv of convs) {
-    const label = dayLabel(conv.createdAt);
+    const label = dayLabel(conv.createdAt, t);
     if (!map.has(label)) map.set(label, []);
     map.get(label)!.push(conv);
   }
@@ -96,6 +99,109 @@ const sk = StyleSheet.create({
   line3: { height: 9, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 4, width: '40%' },
 });
 
+// ── Link preview ──────────────────────────────────────────────────────────────
+
+const SCREEN_W = Dimensions.get('window').width;
+const SUPABASE_URL_LPC = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
+
+function extractFirstPreviewURL(text: string): string | null {
+  const matches = text.match(URL_RE) ?? [];
+  return matches.find(u =>
+    !u.includes('supabase.co/storage') &&
+    !u.includes('supabase.co/auth') &&
+    u.startsWith('https://')
+  ) ?? null;
+}
+
+type LPCPreviewData = {
+  type: 'youtube' | 'spotify' | 'apple_music' | 'twitter' | 'link';
+  url: string;
+  title?: string;
+  description?: string;
+  image?: string;
+  author?: string;
+  siteName?: string;
+} | null;
+
+const lpcCache = new Map<string, LPCPreviewData>();
+
+const LPC_TYPE_META: Record<string, { color: string; label: string; icon: string }> = {
+  youtube:     { color: '#FF0000', label: 'YouTube',     icon: '▶' },
+  spotify:     { color: '#1DB954', label: 'Spotify',     icon: '♫' },
+  apple_music: { color: '#FC3C44', label: 'Apple Music', icon: '♫' },
+  twitter:     { color: '#1D9BF0', label: 'X (Twitter)', icon: '𝕏' },
+  link:        { color: 'rgba(255,255,255,0.35)', label: '', icon: '↗' },
+};
+
+function LinkPreviewCard({ url }: { url: string }) {
+  const [data, setData] = useState<LPCPreviewData | 'loading'>(
+    lpcCache.has(url) ? (lpcCache.get(url) ?? null) : 'loading'
+  );
+
+  useEffect(() => {
+    if (lpcCache.has(url)) return;
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) { lpcCache.set(url, null); if (!cancelled) setData(null); return; }
+      fetch(`${SUPABASE_URL_LPC}/functions/v1/link-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ url }),
+      })
+        .then(r => r.json())
+        .then(d => { lpcCache.set(url, d); if (!cancelled) setData(d); })
+        .catch(() => { lpcCache.set(url, null); if (!cancelled) setData(null); });
+    });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  if (data === 'loading') return <View style={lpc.skeleton} />;
+  if (!data || (!data.title && !data.image)) return null;
+
+  const meta = LPC_TYPE_META[data.type] ?? LPC_TYPE_META.link;
+  const isHorizontal = data.type === 'spotify' || data.type === 'apple_music';
+  const isTwitter = data.type === 'twitter';
+
+  return (
+    <TouchableOpacity style={lpc.card} onPress={() => Linking.openURL(url)} activeOpacity={0.85}>
+      {!isHorizontal && !isTwitter && data.image ? (
+        <Image source={{ uri: data.image }} style={lpc.thumbWide} resizeMode="cover" />
+      ) : null}
+      <View style={[lpc.body, isHorizontal && { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+        {isHorizontal && data.image ? (
+          <Image source={{ uri: data.image }} style={lpc.thumbSquare} resizeMode="cover" />
+        ) : null}
+        <View style={{ flex: 1 }}>
+          <View style={lpc.badge}>
+            <Text style={[lpc.badgeIcon, { color: meta.color }]}>{meta.icon}</Text>
+            {meta.label ? <Text style={[lpc.badgeLabel, { color: meta.color }]}>{meta.label}</Text> : null}
+          </View>
+          {data.title ? <Text style={lpc.title} numberOfLines={2}>{data.title}</Text> : null}
+          {data.author && !isHorizontal ? <Text style={lpc.sub} numberOfLines={1}>{data.author}</Text> : null}
+          {data.description && !isHorizontal ? <Text style={lpc.desc} numberOfLines={isTwitter ? 6 : 2}>{data.description}</Text> : null}
+          {data.siteName && !meta.label ? <Text style={lpc.site} numberOfLines={1}>{data.siteName}</Text> : null}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const lpc = StyleSheet.create({
+  skeleton: { height: 72, borderRadius: 16, marginTop: 8, backgroundColor: 'rgba(255,255,255,0.04)', width: SCREEN_W - 32 },
+  card: { marginTop: 8, borderRadius: 16, overflow: 'hidden', backgroundColor: '#0C0C0C', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)', width: SCREEN_W - 32 },
+  thumbWide: { width: '100%', height: 180 },
+  thumbSquare: { width: 64, height: 64, borderRadius: 10 },
+  body: { padding: 12 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5 },
+  badgeIcon: { fontSize: 11, fontWeight: '700' },
+  badgeLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  title: { color: '#fff', fontSize: 13, fontWeight: '700', lineHeight: 18, marginBottom: 3 },
+  sub: { color: 'rgba(255,255,255,0.45)', fontSize: 11, lineHeight: 16 },
+  desc: { color: 'rgba(255,255,255,0.45)', fontSize: 11, lineHeight: 16, marginTop: 2 },
+  site: { color: 'rgba(255,255,255,0.3)', fontSize: 10, marginTop: 3 },
+});
+
 // ── Conversation detail modal ─────────────────────────────────────────────────
 
 function ConversationModal({
@@ -109,6 +215,7 @@ function ConversationModal({
   onClose: () => void;
   onContinue: () => void;
 }) {
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const isAtLimit = profile?.tier === 'free' &&
     (profile.queries_today ?? 0) >= FREE_DAILY_LIMIT;
@@ -130,32 +237,40 @@ function ConversationModal({
         </View>
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={md.list} showsVerticalScrollIndicator={false}>
-          {conv.messages.map(msg =>
-            msg.role === 'user' ? (
-              <TouchableOpacity
-                key={msg.id}
-                activeOpacity={0.85}
-                onLongPress={() => Share.share({ message: msg.content })}
-                delayLongPress={400}
-                style={md.userWrap}
-              >
-                <LinearGradient colors={GRAD_USER} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={md.userBubble}>
-                  <Text style={md.userText}>{msg.content}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+          {conv.messages.map(msg => {
+            const previewUrl = extractFirstPreviewURL(msg.content);
+            const displayContent = previewUrl
+              ? msg.content.replace(previewUrl, '').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim()
+              : msg.content;
+            return msg.role === 'user' ? (
+              <View key={msg.id}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onLongPress={() => Share.share({ message: msg.content })}
+                  delayLongPress={400}
+                  style={md.userWrap}
+                >
+                  <LinearGradient colors={GRAD_USER} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={md.userBubble}>
+                    {!!displayContent && <Text style={md.userText}>{displayContent}</Text>}
+                  </LinearGradient>
+                </TouchableOpacity>
+                {previewUrl && <View style={md.cardWrap}><LinkPreviewCard url={previewUrl} /></View>}
+              </View>
             ) : (
-              <TouchableOpacity
-                key={msg.id}
-                activeOpacity={1}
-                onLongPress={() => Share.share({ message: msg.content })}
-                delayLongPress={400}
-                style={md.agentBubble}
-              >
-                <Text style={md.agentLabel}>slatt</Text>
-                <Text style={md.agentText}>{msg.content}</Text>
-              </TouchableOpacity>
-            )
-          )}
+              <View key={msg.id}>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onLongPress={() => Share.share({ message: msg.content })}
+                  delayLongPress={400}
+                  style={md.agentBubble}
+                >
+                  <Text style={md.agentLabel}>slatt</Text>
+                  {!!displayContent && <Text style={md.agentText}>{displayContent}</Text>}
+                </TouchableOpacity>
+                {previewUrl && <View style={md.cardWrap}><LinkPreviewCard url={previewUrl} /></View>}
+              </View>
+            );
+          })}
         </ScrollView>
 
         <View style={[md.footer, { paddingBottom: insets.bottom + 12 }]}>
@@ -197,6 +312,7 @@ const md = StyleSheet.create({
   },
   agentLabel: { color: 'rgba(255,255,255,0.18)', fontSize: 9, fontWeight: '800', letterSpacing: 1.5, marginBottom: 7 },
   agentText: { color: 'rgba(255,255,255,0.88)', fontSize: 15, lineHeight: 23 },
+  cardWrap: { alignSelf: 'flex-start', paddingLeft: 0 },
   footer: {
     paddingHorizontal: 16, paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.07)',
@@ -216,7 +332,7 @@ const md = StyleSheet.create({
 
 export default function HistoryScreen() {
   const router = useRouter();
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [selected, setSelected] = useState<Conversation | null>(null);
@@ -287,7 +403,7 @@ export default function HistoryScreen() {
     router.navigate('/(tabs)/chat');
   };
 
-  const groups = groupConversations(convs);
+  const groups = groupConversations(convs, t);
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>

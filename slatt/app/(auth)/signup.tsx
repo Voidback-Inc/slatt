@@ -10,7 +10,7 @@ import { Link, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
-import { t, LANGUAGES } from '@/lib/i18n';
+import { LANGUAGES } from '@/lib/i18n';
 import { useLanguage } from '@/lib/useLanguage';
 
 const C = {
@@ -33,6 +33,7 @@ const RING_SIZE = 100;
 const LOGO_SIZE = RING_SIZE - 6;
 
 function PasswordStrength({ password }: { password: string }) {
+  const { t } = useLanguage();
   const checks = [
     password.length >= 8,
     /[A-Z]/.test(password),
@@ -82,7 +83,7 @@ const ps = StyleSheet.create({
 
 export default function SignupScreen() {
   const router = useRouter();
-  const { lang, changeLang } = useLanguage();
+  const { lang, t, changeLang } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');

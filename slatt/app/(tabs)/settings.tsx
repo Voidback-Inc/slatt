@@ -12,7 +12,7 @@ import { STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@
 import { purchasePlan, restorePurchases, type PlanKey } from '@/lib/iap';
 import { useProfile } from '@/lib/useProfile';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
-import { t, LANGUAGES } from '@/lib/i18n';
+import { LANGUAGES } from '@/lib/i18n';
 import { useLanguage } from '@/lib/useLanguage';
 const Logo = require('@/assets/images/icon.png');
 
@@ -86,7 +86,7 @@ function Badge({ label, color }: { label: string; color?: string }) {
 
 export default function SettingsScreen() {
   const { profile, email, reloadProfile } = useProfile();
-  const { lang, changeLang } = useLanguage();
+  const { lang, t, changeLang } = useLanguage();
   const [showLangModal, setShowLangModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<PlanKey | null>(null);
   const [restoring, setRestoring] = useState(false);

@@ -59,6 +59,10 @@ export async function purchasePlan(plan: PlanKey): Promise<void> {
   const rc = getRC();
   if (!rc) return;
   try {
+    // Identify user before purchase so RC subscriber ID matches Supabase user ID
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) { try { await rc.logIn(user.id); } catch {} }
+
     const offerings = await rc.getOfferings();
     const current = offerings.current;
     if (!current) throw new Error('No offerings available. Make sure products are configured in RevenueCat.');
@@ -83,6 +87,8 @@ export async function restorePurchases(): Promise<boolean> {
   const rc = getRC();
   if (!rc || isExpoGo()) return false;
   try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) { try { await rc.logIn(user.id); } catch {} }
     const info = await rc.restorePurchases();
     const active = Object.keys(info.entitlements.active).length > 0;
     if (active) await activatePro();
@@ -92,15 +98,19 @@ export async function restorePurchases(): Promise<boolean> {
   }
 }
 
-async function activatePro() {
+async function activatePro(retries = 2): Promise<void> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-    await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/apple-iap`, {
+    const res = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/apple-iap`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
       body: JSON.stringify({ activate: true }),
     });
+    if (res.status === 402 && retries > 0) {
+      await new Promise(r => setTimeout(r, 2500));
+      return activatePro(retries - 1);
+    }
   } catch {}
 }
 

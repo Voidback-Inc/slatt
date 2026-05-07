@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
-import { t, LANGUAGES } from '@/lib/i18n';
+import { LANGUAGES } from '@/lib/i18n';
 import { useLanguage } from '@/lib/useLanguage';
 
 const C = {
@@ -33,7 +33,7 @@ const LOGO_SIZE = RING_SIZE - 6;
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { lang, changeLang } = useLanguage();
+  const { lang, t, changeLang } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);

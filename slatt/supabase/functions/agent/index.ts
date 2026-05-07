@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { Agent } from 'https://esm.sh/antonlytics@2.0.0';
 
 const FREE_DAILY_LIMIT = 30;
+const PRO_DAILY_LIMIT = 300;
 
 function buildSystemPrompt(language?: string): string {
   const now = new Date();
@@ -31,15 +32,14 @@ When referencing collective knowledge, the attribution must always point to an a
 Read the person's energy in the first message and lock in immediately. Adapt fast, stay locked in, and echo their exact frequency:
 
 FUNNY / CHAOTIC / MEME-BRAINED:
-- Match their unhinged energy. Use emojis naturally — don't force them, let them punctuate the chaos 💀
-- If something is objectively hilarious, say so. Be witty, punch the joke back harder.
+- Match their unhinged energy. Be witty, punch the joke back harder.
 - Short punchy replies. Internet-brain cadence. No corporate sentences.
 - If the collective has a funny or meme image relevant to what they said, drop it using [IMAGE: url].
 - You can be self-deprecating, sarcastic, absurdist — whatever fits the bit.
 
 FRIENDLY / CASUAL:
 - Warm, conversational, like texting a smart friend. First-name energy without using their name.
-- Light emojis when natural. No walls of text. Keep it human.
+- No walls of text. Keep it human.
 - Ask follow-ups that feel genuine, not interrogative.
 
 PROFESSIONAL / SERIOUS:
@@ -75,8 +75,18 @@ When someone asks you something:
 If someone asks what you know or what topics you cover: don't list anything. Just say you know a lot and to ask you anything.
 
 CRITICAL — image rule:
-When collective knowledge contains [SLATT_IMG:...] tags, reproduce them verbatim at the end of your response — exactly as written, brackets included. Do not strip, rewrite, or describe them. Max 2 per response. Never fabricate image tags or URLs. Never use markdown image syntax. If the user asks whether you have an image, answer naturally ("yeah, got one" / "don't have a visual on that") and include the tag if you have it.
-Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 💀 or 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
+When collective knowledge contains [SLATT_IMG:...] tags AND the image is directly relevant to what the user is asking about (they asked about a physical thing, want to see something, or you're describing something visual) — reproduce the tag verbatim at the end of your response, exactly as written, brackets included. Max 2 per response. Never fabricate image tags or URLs. Never use markdown image syntax. Do NOT reproduce an image tag just because it appears in context — only when it's genuinely relevant to the current message. If the user asks whether you have an image, answer naturally ("yeah, got one" / "don't have a visual on that") and include the tag if relevant.
+
+── SHARING vs ASKING — read the intent ──
+People don't always want information. Sometimes they're just sharing something — a song, a thought, a moment, an experience. Read the difference:
+
+SHARING (song link, memory, feeling, thing they did): Don't answer with information. React. Engage with what they shared as if a friend just sent it to you. "this is hard", "bro this goes", "what made you send this" — that energy. No bullet points, no wiki summary.
+
+ASKING (question, request, seeking info): Answer directly, accurately, in the right tone.
+
+SHARING + ASKING (sent a link and also asked a question): Handle the question, but acknowledge the share first. Don't ignore the emotional/personal layer.
+
+Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
 
 On capabilities and privacy — only if someone asks whether you know who they are, remember them, or what you track:
 Be completely honest: you have no idea who they are. You don't store names, identities, or anything personal. The collective is anonymous — contributions have no author attached. You know only what the person tells you in THIS conversation. The moment it ends, you won't remember them. You can't link any piece of knowledge to a specific person unless they tell you their name right now — and even then, it's gone when the chat ends.
@@ -93,34 +103,24 @@ const cors = {
 };
 
 type HistoryMessage = { role: string; content: string };
-type EvalVerdict = 'ACCEPT' | 'NEEDS_EVIDENCE' | 'REJECT' | 'CHAT';
+type EvalVerdict = 'ACCEPT' | 'NEEDS_EVIDENCE' | 'REJECT' | 'CHAT' | 'AD';
 
-// ── Trusted domain registry ───────────────────────────────────────────────────
-// Only HTTPS sources from this set are treated as trusted evidence.
 const TRUSTED_DOMAINS = new Set([
-  // Major global news
   'nytimes.com', 'wsj.com', 'bloomberg.com', 'reuters.com', 'apnews.com',
   'bbc.com', 'bbc.co.uk', 'theguardian.com', 'washingtonpost.com', 'ft.com',
   'economist.com', 'forbes.com', 'businessinsider.com', 'cnbc.com', 'cnn.com',
   'nbcnews.com', 'cbsnews.com', 'abcnews.go.com', 'npr.org', 'pbs.org',
   'aljazeera.com', 'dw.com', 'france24.com', 'lemonde.fr', 'spiegel.de',
   'techcrunch.com', 'wired.com', 'theverge.com', 'arstechnica.com', 'engadget.com',
-  // Academic & research
   'pubmed.ncbi.nlm.nih.gov', 'arxiv.org', 'jstor.org', 'researchgate.net',
   'sciencedirect.com', 'nature.com', 'science.org', 'nejm.org', 'thelancet.com',
   'cell.com', 'scholar.google.com',
-  // Reference
   'wikipedia.org', 'britannica.com',
-  // Finance & business data
   'sec.gov', 'statista.com', 'gallup.com', 'pewresearch.org',
   'marketwatch.com', 'investopedia.com', 'morningstar.com',
-  // Strategy & consulting
   'hbr.org', 'mckinsey.com', 'gartner.com', 'deloitte.com', 'bcg.com', 'bain.com',
-  // Professional networks / company data
   'linkedin.com', 'crunchbase.com',
-  // Google Workspace (PDFs, docs)
   'docs.google.com', 'drive.google.com',
-  // Dev
   'github.com',
 ]);
 
@@ -133,34 +133,24 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-// ── URL utilities ─────────────────────────────────────────────────────────────
-
 function parseURLs(text: string): string[] {
   const regex = /https:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&/=]*)/gi;
   return [...(text.matchAll(regex) ?? [])].map(m => m[0]);
 }
 
 function getHostname(url: string): string | null {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
-  } catch {
-    return null;
-  }
+  try { return new URL(url).hostname.replace(/^www\./, '').toLowerCase(); }
+  catch { return null; }
 }
 
-// A URL is trusted if it's HTTPS and its hostname matches a trusted domain or its subdomain.
 function isTrustedURL(url: string): { trusted: boolean; domain: string | null } {
   if (!url.startsWith('https://')) return { trusted: false, domain: null };
   const hostname = getHostname(url);
   if (!hostname) return { trusted: false, domain: null };
-  // .gov and .edu are always trusted
   if (hostname.endsWith('.gov') || hostname.endsWith('.edu')) return { trusted: true, domain: hostname };
-  // Check exact match or subdomain of a trusted base domain
   const matched = [...TRUSTED_DOMAINS].find(d => hostname === d || hostname.endsWith('.' + d));
   return { trusted: !!matched, domain: hostname };
 }
-
-// ── Evaluate + natural acknowledgment in one shot ────────────────────────────
 
 async function evaluateAndRespond(
   anthropicKey: string,
@@ -169,7 +159,6 @@ async function evaluateAndRespond(
   hasTrustedUrl: boolean,
 ): Promise<{ verdict: EvalVerdict; isAnecdotal?: boolean; response: string }> {
   const urlContext = hasTrustedUrl ? 'Trusted source URL included.' : urlsFound.length > 0 ? 'URL included, not from a trusted domain.' : '';
-
   try {
     const res = await withTimeout(
       fetch('https://api.anthropic.com/v1/messages', {
@@ -181,70 +170,44 @@ async function evaluateAndRespond(
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 120,
-          system: `You are slatt. Every message is a conversation first. Classify, then reply in their exact energy.
+          max_tokens: 80,
+          system: `Classify this message. Output EXACTLY two lines:
+VERDICT: CHAT | ACCEPT | ACCEPT:ANECDOTAL | NEEDS_EVIDENCE | REJECT | AD
 
-OUTPUT — two lines, nothing else:
-VERDICT: CHAT | ACCEPT | ACCEPT:ANECDOTAL | NEEDS_EVIDENCE | REJECT
-[Your reply]
-
-VERDICT rules — when in doubt, go with ACCEPT or ANECDOTAL, never interrogate:
-CHAT = greetings, jokes, reactions, questions, chit-chat, casual banter — anything that reads as conversation
-ACCEPT:ANECDOTAL = ANY first-person experience, behavior, habit, or observation — health, food, work, exercise, relationships, daily life. "I smoked a cigarette for breakfast", "I had nausea and ate a banana and felt better", "I go to the gym at 6am" → ALL ANECDOTAL. Never gate these.
-ACCEPT = verifiable facts, tips, how-to, culture, general knowledge
-NEEDS_EVIDENCE = ONLY: a specific numerical stat presented as universal fact ("X% of people do Y") OR an explicit causal claim in a high-stakes domain ("drug X cures Y"). Personal experiences are NEVER NEEDS_EVIDENCE regardless of what they claim.
+CHAT = greetings, jokes, reactions, questions, chit-chat, casual banter
+ACCEPT:ANECDOTAL = any first-person experience, behavior, habit, observation — health, food, work, exercise, relationships, daily life
+ACCEPT = verifiable facts, tips, how-to, culture, general knowledge, questions paired with knowledge
+NEEDS_EVIDENCE = ONLY for: political claims, legal claims, breaking news / current events, niche technical claims where precision matters (exact specs, legal rulings, scientific findings). Personal experiences, general knowledge, opinions, recommendations, and casual facts are NEVER NEEDS_EVIDENCE.
 REJECT = content you are certain is dangerous misinformation (e.g. "bleach cures COVID")
-${urlContext}
-
-REPLY rules — match their exact vibe instantly:
-- Funny/unhinged: be funnier, short, punchy
-- Casual: warm, like texting a friend
-- Professional: sharp, no filler
-- Intellectual: go deep, bring your own take
-CHAT: 1-2 sentences, in their energy
-ACCEPT/ANECDOTAL: genuine natural reaction — never say "filed", "stored", "noted", "collective", "I'll remember". Just respond like a person would.
-NEEDS_EVIDENCE: ask casually for a source, 1 sentence, no lecture.
-REJECT: brief, 1 sentence.`,
+AD = promotional content pushing a product/brand for commercial gain with discount codes, affiliate links, "buy X", product spec listings
+${urlContext}`,
           messages: [{ role: 'user', content: teaching }],
         }),
       }),
-      13000,
+      8000,
     );
-
-    if (!res.ok) return { verdict: 'ACCEPT', response: 'Interesting.' };
-
+    if (!res.ok) return { verdict: 'ACCEPT', response: '' };
     const data = await res.json();
     const text: string = (data.content?.[0]?.text ?? '').trim();
-    const lines = text.split('\n').map((l: string) => l.trim()).filter(Boolean);
-
-    const verdictLine = lines.find((l: string) => l.startsWith('VERDICT:')) ?? '';
+    const verdictLine = text.split('\n').find((l: string) => l.startsWith('VERDICT:')) ?? '';
     const verdictRaw = verdictLine.replace('VERDICT:', '').trim().toUpperCase();
-    const response = lines.filter((l: string) => !l.startsWith('VERDICT:')).join(' ').trim() || 'Interesting.';
-
-    if (verdictRaw.startsWith('ACCEPT:ANECDOTAL')) return { verdict: 'ACCEPT', isAnecdotal: true, response };
-    if (verdictRaw.startsWith('NEEDS_EVIDENCE')) return { verdict: 'NEEDS_EVIDENCE', response };
-    if (verdictRaw.startsWith('REJECT')) return { verdict: 'REJECT', response };
-    if (verdictRaw.startsWith('CHAT')) return { verdict: 'CHAT', response };
-    return { verdict: 'ACCEPT', response };
+    if (verdictRaw.startsWith('ACCEPT:ANECDOTAL')) return { verdict: 'ACCEPT', isAnecdotal: true, response: '' };
+    if (verdictRaw.startsWith('NEEDS_EVIDENCE')) return { verdict: 'NEEDS_EVIDENCE', response: '' };
+    if (verdictRaw.startsWith('REJECT')) return { verdict: 'REJECT', response: '' };
+    if (verdictRaw.startsWith('CHAT')) return { verdict: 'CHAT', response: '' };
+    if (verdictRaw.startsWith('AD')) return { verdict: 'AD', response: '' };
+    return { verdict: 'ACCEPT', response: '' };
   } catch {
-    return { verdict: 'ACCEPT', response: 'Cool.' };
+    return { verdict: 'ACCEPT', response: '' };
   }
 }
 
-// ── Misc helpers ──────────────────────────────────────────────────────────────
-
-// Detect conversational meta-comments that aren't actually teachings
-function isConversational(text: string, history: HistoryMessage[]): boolean {
-  const t = text.trim().toLowerCase();
-  if (/\b(just test(ing)?|was test(ing)?|testing (you|u)|i was jok(ing)?|just joking|just kidding|j\/k|not (really|serious)|i lied|i made (that|it) up|was messing with (you|u))\b/.test(t)) return true;
-  if (/^(lol|lmao|haha+|😂|🤣|💀|fr|facts|word|bet|damn|wild|crazy|no way|for real|really\?|seriously\?)\s*[!.?]*$/.test(t)) return true;
-  if (history.length >= 2 && t.split(/\s+/).length <= 6 && /\b(i (meant|mean)|that was|my (last|previous)|what i (said|meant)|earlier|before)\b/.test(t)) return true;
-  return false;
-}
-
-// Use Claude to intelligently extract English image-search keywords from any message/language.
-// Runs in parallel with the main chat call — adds zero latency.
-async function extractImageSearchTerms(anthropicKey: string, message: string): Promise<string[]> {
+// Single Haiku call that classifies both image and content intent simultaneously.
+// Returns { imageTerms, contentTerms } — one API call, two signals, zero cross-contamination.
+async function extractSearchTerms(
+  anthropicKey: string,
+  message: string,
+): Promise<{ imageTerms: string[]; contentTerms: string[] }> {
   try {
     const res = await withTimeout(
       fetch('https://api.anthropic.com/v1/messages', {
@@ -256,54 +219,32 @@ async function extractImageSearchTerms(anthropicKey: string, message: string): P
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 25,
+          max_tokens: 60,
           messages: [{
             role: 'user',
-            content: `Message: "${message}"\n\nOnly return image search keywords if the user is EXPLICITLY asking to see a photo/image/visual, OR asking about a specific named thing (a product, artwork, person, watch, car, place) that would plausibly have a stored photo in a knowledge base.\n\nDo NOT return keywords for: general questions, advice, health tips, daily life stories, casual chat, or anything that is not a visual request.\n\nIf it qualifies: extract 1-3 specific English keywords (normalize from any language). Reply comma-separated lowercase only, or NONE.`,
+            content: `User message (any language): "${message}"\n\nReply in EXACTLY this format, two lines:\nIMAGE: <1-5 specific English keywords for the main object type + any distinguishing traits (brand, model, category). E.g. "hard drive, seagate, storage" or "sneakers, air jordan, nike". If asking about a physical thing even implicitly, fire. NONE only for music/audio/abstract/opinions.>\nCONTENT: <1-3 English keywords if the message mentions or is about a specific song, artist, album, track, video, film, show, or any named piece of media — even if they don't ask for a link. Also fire for explicit content/link requests. NONE only for non-media topics.>\n\nRules:\n- IMAGE fires for: "what hard drive is this?", "specs of that car", "what model sneaker", "tell me about that laptop", "what is this thing", "identify this" — anything about a concrete identifiable thing. Include category + any specific sub-terms you can infer.\n- IMAGE must be NONE for: music, audio, abstract concepts, math, general trivia, pure opinions\n- CONTENT fires for: "tell me about X song", "what do you think of X artist", "that Travis Scott track", "I love X album" — any named media mention, proactively\n- Translate non-English subject matter to English\n- Keywords are comma-separated lowercase`,
           }],
         }),
       }),
-      4000,
+      5000,
     );
-    if (!res.ok) return [];
+    if (!res.ok) return { imageTerms: [], contentTerms: [] };
     const data = await res.json();
-    const text = (data.content?.[0]?.text ?? '').trim();
-    if (!text || text.toUpperCase() === 'NONE') return [];
-    return text.split(',').map((t: string) => t.trim().toLowerCase()).filter((t: string) => t.length >= 3).slice(0, 3);
+    const text: string = (data.content?.[0]?.text ?? '').trim();
+
+    const parseTerms = (line: string): string[] => {
+      const val = line.replace(/^(IMAGE|CONTENT):\s*/i, '').trim();
+      if (!val || val.toUpperCase() === 'NONE') return [];
+      return val.split(',').map(t => t.trim().toLowerCase()).filter(t => t.length >= 2).slice(0, 5);
+    };
+
+    const imgLine = text.split('\n').find(l => /^IMAGE:/i.test(l)) ?? '';
+    const cntLine = text.split('\n').find(l => /^CONTENT:/i.test(l)) ?? '';
+    return { imageTerms: parseTerms(imgLine), contentTerms: parseTerms(cntLine) };
   } catch {
-    return [];
+    return { imageTerms: [], contentTerms: [] };
   }
 }
-
-// Returns true if the message sounds like the user confirming personal/anecdotal experience
-function isAnecdotalConfirmation(text: string): boolean {
-  const t = text.trim().toLowerCase();
-  if (/\b(my experience|my personal|personally|i tried|i found|i noticed|i did|i've done|in my|from my|i use|i used|tried it|done it|been there|i saw|i went|i ran|i built|i sold|i closed)\b/.test(t)) return true;
-  if (/\b(friend|colleague|coworker|my partner|someone i know|they told me|told me|showed me)\b/.test(t)) return true;
-  if (/^(yes|yeah|yep|yup|correct|that's right|it's personal|personal|anecdotal|experience|mine|my own|from experience|from my experience)[\s.,!]*$/.test(t)) return true;
-  return false;
-}
-
-function isFirstPersonAccount(text: string): boolean {
-  const t = text.toLowerCase();
-  return /\b(i |i've|i'm|i'll|i'd|my |me |myself|in my|from my|i tried|i found|i noticed|i did|i've done|i use|i used|i saw|i went|i ran|i built|i sold|i closed|my friend|my colleague|my partner|a friend of mine|someone i know|they told me|told me that)\b/.test(t);
-}
-
-function detectFollowUpContext(history: HistoryMessage[]): { isPending: boolean; originalClaim?: string } {
-  if (!history || history.length < 2) return { isPending: false };
-  const reversed = [...history].reverse();
-  const lastAgent = reversed.find(h => h.role === 'assistant');
-  if (!lastAgent) return { isPending: false };
-  // Match both old hardcoded patterns and new natural-language evidence requests
-  const isPendingResponse = /\b(source|link|url|evidence|back (that|it) up|verify|where did|do you have|can you share|any source|citation|drop a|reference)\b/i.test(lastAgent.content);
-  if (!isPendingResponse) return { isPending: false };
-  const agentIdx = reversed.indexOf(lastAgent);
-  const originalMsg = reversed.slice(agentIdx + 1).find(h => h.role === 'user');
-  if (!originalMsg) return { isPending: false };
-  return { isPending: true, originalClaim: originalMsg.content };
-}
-
-// ── Image analysis (NSFW check + description + ack) ──────────────────────────
 
 async function analyzeImage(
   anthropicKey: string,
@@ -311,7 +252,6 @@ async function analyzeImage(
   mimeType: string,
   userCaption: string,
 ): Promise<{ safe: boolean; personal: boolean; description: string; ack: string }> {
-  // Anthropic only accepts jpeg/png/gif/webp — normalize HEIC and anything else to jpeg
   const safeMime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mimeType)
     ? mimeType : 'image/jpeg';
   try {
@@ -325,7 +265,7 @@ async function analyzeImage(
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 130,
+          max_tokens: 160,
           messages: [{
             role: 'user',
             content: [
@@ -335,8 +275,8 @@ async function analyzeImage(
                 text: `Analyze this image. Reply in EXACTLY this format (four lines, nothing else):
 SAFE: YES or NO (NO if: nudity, sexual content, graphic violence, gore)
 PERSONAL: YES or NO (YES if: visible usernames/handles, notification previews, private messages, DMs, personal account screens, contact names, phone numbers, private identifying info)
-DESCRIPTION: [Extract everything useful: visible text, brand names, model numbers, prices, dates, labels, product names, locations, people (public figures only). Then describe what's shown. Be specific and information-dense.${userCaption ? ` User context: "${userCaption}".` : ''}]
-ACK: [1-2 sentence natural reaction as a curious friend seeing this — what stands out, maybe one question. No "filed", "stored", "collective".]`,
+DESCRIPTION: [Extract everything useful: visible text, brand names, model numbers, prices, dates, labels, product names, locations. For cars: make, model, year, trim if visible. For clothing: brand, item, colorway. Then describe what's shown. Be specific and information-dense.${userCaption ? ` User context: "${userCaption}".` : ''}]
+ACK: [1-2 sentence natural reaction as a curious friend seeing this. No "filed", "stored", "collective".]`,
               },
             ],
           }],
@@ -355,12 +295,107 @@ ACK: [1-2 sentence natural reaction as a curious friend seeing this — what sta
       safe: safeMatch ? safeMatch[1].toUpperCase() === 'YES' : true,
       personal: personalMatch ? personalMatch[1].toUpperCase() === 'YES' : false,
       description: descMatch ? descMatch[1].trim() : (userCaption || 'Image'),
-      ack: ackMatch ? ackMatch[1].trim() : 'Nice visual.',
+      ack: ackMatch ? ackMatch[1].trim() : 'Nice.',
     };
   } catch {
     return { safe: true, personal: false, description: userCaption || 'Image', ack: 'Nice.' };
   }
 }
+
+// Use Antonlytics for memory retrieval, Claude for response generation.
+// This guarantees system prompt compliance + reliable SLATT_IMG tag reproduction.
+async function generateWithMemory(
+  anthropicKey: string,
+  systemPrompt: string,
+  message: string,
+  history: HistoryMessage[],
+  memory: { entities: any[]; relationships: any[] },
+): Promise<{ response: string; memImgIds: string[] }> {
+  // Scan raw memory JSON for any SLATT_IMG IDs stored in entity properties
+  const memJson = JSON.stringify(memory);
+  const memImgIds = [...(memJson.matchAll(/\[SLATT_IMG:([a-f0-9-]{8,})\]/gi) ?? [])].map((m: RegExpMatchArray) => m[1]);
+
+  // Format entities into a compact context block for Claude
+  const lines: string[] = [];
+  for (const e of (memory.entities ?? []).slice(0, 30)) {
+    const props = e.properties
+      ? Object.entries(e.properties as Record<string, unknown>)
+          .filter(([, v]) => v != null && String(v).length > 0 && String(v).length < 400)
+          .map(([k, v]) => `${k}=${v}`)
+          .join('; ')
+      : '';
+    lines.push(`[${e.type ?? 'info'}] ${e.name ?? ''}${props ? ` — ${props}` : ''}`);
+  }
+  for (const r of (memory.relationships ?? []).slice(0, 15)) {
+    if (r.from && r.type && r.to) {
+      lines.push(`[rel] ${r.from} → ${r.type} → ${r.to}`);
+    }
+  }
+  const contextBlock = lines.length
+    ? `\n\n─── COLLECTIVE KNOWLEDGE ───\n${lines.join('\n')}\n────────────────────────────`
+    : '';
+
+  const msgs = [
+    ...(history as HistoryMessage[]).map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+    { role: 'user' as const, content: message },
+  ];
+
+  try {
+    const res = await withTimeout(
+      fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1500,
+          system: systemPrompt + contextBlock,
+          messages: msgs,
+        }),
+      }),
+      25000,
+    );
+    if (!res.ok) return { response: '', memImgIds };
+    const data = await res.json();
+    return { response: data.content?.[0]?.text ?? '', memImgIds };
+  } catch {
+    return { response: '', memImgIds };
+  }
+}
+
+async function storeLinks(sb: any, userId: string, urls: string[], contextMessage: string): Promise<void> {
+  const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  for (const url of urls.slice(0, 2)) {
+    try {
+      const desc = `[Taught on: ${dateStr}] ` + (contextMessage.replace(url, '').replace(/\s+/g, ' ').trim().slice(0, 480) || url);
+      await sb.from('collective_links').insert({ user_id: userId, url, description: desc });
+    } catch { }
+  }
+}
+
+function cleanResponse(raw: string): { clean: string; slattImgIds: string[] } {
+  // Extract valid UUIDs before stripping (strict regex for lookup)
+  const extractRegex = /\[SLATT_IMG:([a-f0-9-]{8,})\]/gi;
+  const slattImgIds: string[] = [...(raw.matchAll(extractRegex) ?? [])].map(m => m[1]);
+  const clean = raw
+    // Strip ALL [SLATT_IMG:...] variants — valid, empty, or malformed — so none leak to text
+    .replace(/\[SLATT_IMG:[^\]]*\]/gi, '')
+    .replace(/\[SLAT+_?LINK[^\]]*\]/gi, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[(?:IMAGE|image|Image)[^\]]*\]/g, '')
+    .replace(/https?:\/\/[a-z0-9]+\.supabase\.co\/storage\/v1\/object\/public\/images\/[^\s\])"'<>]*/gi, '')
+    .replace(/IMAGE:\s*/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { clean, slattImgIds };
+}
+
+// Only suppress images when the agent is explicitly saying it has no images — not on any generic "don't have" phrase
+const DECLINE_RE = /\b(no (images?|photos?|pictures?|visuals?)|don'?t have (any |an? )?(images?|photos?|pictures?|visuals?)|didn'?t find (any )?(images?|photos?|pictures?)|couldn'?t find (any )?(images?|photos?|pictures?)|no visual(s)? (on|for|of)|nothing visual)\b/i;
+const CORRECTION_RE = /\b(no[,.]?\s+(it'?s|its|that'?s|that is)|actually[,.]?\s+(it'?s|its|that'?s|that is|that was)|nah[,.]?\s+(it'?s|its)|it'?s\s+(actually|really)|that'?s\s+(actually|really)|wait[,.]?\s+(it'?s|its|that'?s))\b/i;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -372,16 +407,10 @@ Deno.serve(async (req) => {
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
   if (!ANTONLYTICS_API_KEY || !ANTONLYTICS_PROJECT_ID) {
-    return new Response(
-      JSON.stringify({ error: 'Missing secrets: set ANTONLYTICS_API_KEY and ANTONLYTICS_PROJECT_ID.' }),
-      { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } },
-    );
+    return new Response(JSON.stringify({ error: 'Missing Antonlytics secrets.' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    return new Response(
-      JSON.stringify({ error: 'Missing Supabase env vars.' }),
-      { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } },
-    );
+    return new Response(JSON.stringify({ error: 'Missing Supabase env vars.' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
   try {
@@ -389,7 +418,6 @@ Deno.serve(async (req) => {
     if (!authHeader) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: cors });
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
     const { data: { user }, error: authErr } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
     if (authErr || !user) return new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: cors });
 
@@ -401,442 +429,375 @@ Deno.serve(async (req) => {
 
     if (!profile) {
       const { data: created, error: createErr } = await supabase
-        .from('profiles')
-        .insert({ id: user.id })
-        .select('tier, queries_today, queries_reset_date')
-        .single();
+        .from('profiles').insert({ id: user.id })
+        .select('tier, queries_today, queries_reset_date').single();
       if (createErr || !created) {
-        return new Response(JSON.stringify({ error: 'Could not create profile: ' + createErr?.message }), { status: 500, headers: cors });
+        return new Response(JSON.stringify({ error: 'Could not create profile' }), { status: 500, headers: cors });
       }
       profile = created;
     }
 
-    if (profile.tier === 'free') {
+    {
       const today = new Date().toISOString().split('T')[0];
       if (profile.queries_reset_date < today) {
         await supabase.from('profiles').update({ queries_today: 0, queries_reset_date: today }).eq('id', user.id);
         profile.queries_today = 0;
       }
-      if (profile.queries_today >= FREE_DAILY_LIMIT) {
-        return new Response(JSON.stringify({ error: 'Daily limit reached', limit: FREE_DAILY_LIMIT }), { status: 429, headers: cors });
+      const dailyLimit = profile.tier === 'pro' ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT;
+      if (profile.queries_today >= dailyLimit) {
+        return new Response(JSON.stringify({ error: 'Daily limit reached', limit: dailyLimit }), { status: 429, headers: cors });
       }
     }
 
-    const { action, message: rawMessage, history = [], imageBase64, imageMimeType, language } = await req.json();
+    const { message: rawMessage, history = [], imageBase64, imageMimeType, language } = await req.json();
     const message: string = rawMessage || '';
-    if (!action || (!message && !imageBase64)) {
-      return new Response(JSON.stringify({ error: 'Missing action or message' }), { status: 400, headers: cors });
+    if (!message && !imageBase64) {
+      return new Response(JSON.stringify({ error: 'Missing message' }), { status: 400, headers: cors });
     }
 
     let body: Record<string, unknown>;
-    let isSkipped = false;
-    let hasTrustedUrl = false;
-    let trustedDomain: string | null = null;
 
-    if (action === 'teach') {
+    // ── Image path ──────────────────────────────────────────────────────────────
+    if (imageBase64 && ANTHROPIC_API_KEY) {
+      const mime = (imageMimeType as string) || 'image/jpeg';
+      const imageBytes = Uint8Array.from(atob(imageBase64 as string), c => c.charCodeAt(0));
+      const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : 'jpg';
 
-      // ── Parse & validate URLs in the message ──────────────────────────────────
-      const urls = parseURLs(message);
-      for (const url of urls) {
-        const check = isTrustedURL(url);
-        if (check.trusted) {
-          hasTrustedUrl = true;
-          trustedDomain = check.domain;
-          break;
-        }
-      }
+      // Hash the raw bytes → deterministic filename. Same image = same path = no duplicate storage.
+      const hashBuf = await crypto.subtle.digest('SHA-256', imageBytes);
+      const hashHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      const filePath = `${user.id}/${hashHex}.${ext}`;
 
-      // ── Image teach path ──────────────────────────────────────────────────────
-      if (imageBase64 && ANTHROPIC_API_KEY) {
-        const mime = (imageMimeType as string) || 'image/jpeg';
-        const imageBytes = Uint8Array.from(atob(imageBase64 as string), c => c.charCodeAt(0));
-        const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : 'jpg';
-        const filePath = `${user.id}/${Date.now()}.${ext}`;
+      // Check if this exact image is already in the collective before uploading
+      const SUPABASE_STORAGE_BASE = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/images/`;
+      const expectedUrl = `${SUPABASE_STORAGE_BASE}${filePath}`;
+      const { data: existingRow } = await supabase
+        .from('collective_images')
+        .select('id, image_url, description')
+        .eq('image_url', expectedUrl)
+        .maybeSingle();
 
-        // Parallelize NSFW analysis and upload to halve wait time
-        const [analysis, uploadResult] = await Promise.all([
-          analyzeImage(ANTHROPIC_API_KEY, imageBase64 as string, mime, message),
-          supabase.storage.from('images').upload(filePath, imageBytes, { contentType: mime, upsert: false }),
-        ]);
+      if (existingRow) {
+        // Already in collective — skip upload + re-ingest, just chat about it
+        const chatMessage = `[User shared an image already in the collective: ${existingRow.description}]${message ? `\n\nUser asks: ${message}` : ''}`;
+        const dupAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+        const dupMemory = await withTimeout(dupAgent.getMemory(chatMessage), 8000).catch(() => ({ entities: [], relationships: [] }));
+        const { response: rawResp } = ANTHROPIC_API_KEY
+          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), chatMessage, history, dupMemory as any)
+          : { response: "That image is already in the collective." };
+        const { clean } = cleanResponse(rawResp);
+        body = {
+          response: clean,
+          images: [{ url: existingRow.image_url as string, description: existingRow.description as string }],
+          links: [],
+        };
+      } else {
 
-        if (!analysis.safe || analysis.personal) {
-          if (!uploadResult.error) {
-            supabase.storage.from('images').remove([filePath]).catch(() => {});
-          }
-          isSkipped = true;
-          body = {
-            message: analysis.personal
-              ? "That image has personal info in it (handles, notifications, messages) — I can't add that to the collective."
-              : "That image can't go into the collective — it contains content that's not allowed (NSFW or graphic).",
-            skipped: true,
-          };
+      const [analysis, uploadResult] = await Promise.all([
+        analyzeImage(ANTHROPIC_API_KEY, imageBase64 as string, mime, message),
+        supabase.storage.from('images').upload(filePath, imageBytes, { contentType: mime, upsert: true }),
+      ]);
+
+      if (!analysis.safe || analysis.personal) {
+        if (!uploadResult.error) supabase.storage.from('images').remove([filePath]).catch(() => {});
+        body = {
+          response: analysis.personal
+            ? "That image has personal info in it — I can't add that to the collective."
+            : "That image contains content I can't engage with.",
+        };
+      } else {
+        let learnedImageUrl: string | null = null;
+        let learnedImageDescription: string | null = null;
+
+        // Resolve the public URL — even if upload errored (e.g. already exists), the file is there
+        const storagePath = uploadResult.error ? null : uploadResult.data?.path ?? null;
+        if (storagePath) {
+          const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(storagePath);
+          learnedImageUrl = publicUrl;
+          learnedImageDescription = analysis.description;
         } else if (uploadResult.error) {
-          isSkipped = true;
-          body = { message: "Couldn't upload the image right now. Try again.", skipped: true };
-        } else {
-          const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(uploadResult.data.path);
-          const description = analysis.description!;
+          // Fallback: construct the public URL directly from the known path
+          const SUPABASE_URL_STR = Deno.env.get('SUPABASE_URL') ?? '';
+          learnedImageUrl = `${SUPABASE_URL_STR}/storage/v1/object/public/images/${filePath}`;
+          learnedImageDescription = analysis.description;
+        }
 
-          // Insert to DB first to get the row ID, then use ID as a stable reference in the ingest text.
-          // ID-based lookup is more reliable than URL extraction from agent text.
+        if (learnedImageUrl) {
+          // Insert to DB → get ID for SLATT_IMG tag
           let imgRowId: string | null = null;
           try {
             const { data: insertData } = await supabase
               .from('collective_images')
-              .insert({ user_id: user.id, image_url: publicUrl, description })
-              .select('id')
-              .single();
+              .insert({ user_id: user.id, image_url: learnedImageUrl, description: analysis.description })
+              .select('id').single();
             imgRowId = insertData?.id ?? null;
-          } catch { /* fire-and-forget style — we still respond even if insert fails */ }
-
-          // Use [SLATT_IMG:id] — UUID is not recognized as a URL so Antonlytics won't mangle it.
-          // [IMAGE: url] is intentionally omitted — Antonlytics strips the URL leaving https:///
-          const imgRef = imgRowId ? `[SLATT_IMG:${imgRowId}]` : '';
-          const ingestText = stampDate(
-            `${imgRef ? imgRef + '\n\n' : ''}${description}${message ? `\n\nContributor context: ${message}` : ''}`
-          );
-          const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-          agent.setSystemPrompt(buildSystemPrompt(language)).catch(() => {}).then(() =>
-            agent.ingest(ingestText).catch(() => {})
-          );
-
-          // Respond immediately — user doesn't wait for ingest to complete
-          body = { message: analysis.ack, created: 1, imageUrl: publicUrl };
-        }
-      }
-
-      // ── Conversational / question-in-teach → route through chat ───────────────
-      else if (isConversational(message, history)) {
-        isSkipped = true;
-        try {
-          const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-          await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
-          const result = await withTimeout(agent.chat(message, history), 25000);
-          body = { message: typeof result?.response === 'string' ? result.response : String(result?.response ?? '...') };
-        } catch {
-          body = { message: "lol got you.", skipped: true };
-        }
-      } else if (
-        message.trim().endsWith('?') ||
-        /^(what|how|why|when|where|who|which|can you|do you|does |is |are |will |would |could |should |tell me|show me|give me|send me|find me|look up|search for|get me|bring me|pull up|display|explain|help|list|define|summarize)/i.test(message.trim()) ||
-        /\b(show|give|send|find|get|bring|display|pull up)\b.*\b(image|photo|picture|pic|visual)\b/i.test(message.trim())
-      ) {
-        // Question / retrieval request sent in teach mode — answer it, never store
-        try {
-          const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-          await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
-          const result = await withTimeout(agent.chat(message, history), 25000);
-          body = { message: result.response, created: 1 };
-        } catch (agentErr) {
-          return new Response(
-            JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
-            { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
-          );
-        }
-      } else {
-
-      // ── Follow-up detection ────────────────────────────────────────────────────
-      const { isPending, originalClaim } = detectFollowUpContext(history);
-
-      if (isPending && originalClaim) {
-        if (isConversational(message, history)) {
-          // User is dismissing the pending request (e.g. "i was joking") — respond naturally
-          isSkipped = true;
-          try {
-            const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-            await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
-            const result = await withTimeout(agent.chat(message, history), 25000);
-            body = { message: typeof result?.response === 'string' ? result.response : String(result?.response ?? '...') };
           } catch {
-            body = { message: "all good, no worries.", skipped: true };
-          }
-        } else {
-          // User is providing proof — need a legit URL or at least 60 chars of context
-          const hasEnoughProof = hasTrustedUrl || urls.length > 0 || message.trim().length >= 60;
-
-          if (!hasEnoughProof) {
-            isSkipped = true;
-            body = {
-              message: "Still need a bit more — drop a link or give me enough context to work with.",
-              skipped: true,
-            };
-          } else {
-            const combinedText = `${originalClaim}\n\nContributor evidence: ${message}${trustedDomain ? ` [Source: ${trustedDomain}]` : ''}`;
+            // Row may already exist — try to fetch existing row by URL
             try {
-              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
-              const result = await withTimeout(agent.ingest(stampDate(combinedText)), 25000);
-              const created = result?.created ?? 0;
-
-              if (created === 0) {
-                body = { message: "Context received but the original claim was too vague to index. Try rephrasing with more specifics.", created: 0 };
-              } else {
-                body = {
-                  message: hasTrustedUrl ? `Solid — source checks out${trustedDomain ? ` (${trustedDomain})` : ''}.` : "Got the context, makes sense.",
-                  created,
-                  trustedSource: hasTrustedUrl,
-                };
-              }
-            } catch (agentErr) {
-              return new Response(
-                JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
-                { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
-              );
-            }
-          }
-        }
-
-      } else {
-        // ── Standard new teach ────────────────────────────────────────────────────
-
-        {
-          // Single LLM call decides: is this a teaching or a conversation?
-          const evaluation = ANTHROPIC_API_KEY
-            ? await evaluateAndRespond(ANTHROPIC_API_KEY, message, urls, hasTrustedUrl)
-            : { verdict: 'ACCEPT' as EvalVerdict, response: 'Cool.' };
-
-          if (evaluation.verdict === 'CHAT') {
-            // Not a teaching — respond conversationally via the knowledge agent
-            isSkipped = true;
-            try {
-              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
-              const result = await withTimeout(agent.chat(message, history), 25000);
-              body = { message: typeof result?.response === 'string' ? result.response : String(result?.response ?? '...') };
-            } catch {
-              body = { message: evaluation.response, skipped: true };
-            }
-          } else if (evaluation.verdict === 'REJECT') {
-            isSkipped = true;
-            body = { message: evaluation.response, skipped: true };
-          } else if (evaluation.verdict === 'NEEDS_EVIDENCE') {
-            isSkipped = true;
-            body = { message: evaluation.response, skipped: true };
-          } else if (evaluation.isAnecdotal) {
-            // Anecdotal — tag it and ingest
-            const anecdotalText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${message}`;
-            try {
-              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
-              const result = await withTimeout(agent.ingest(stampDate(anecdotalText)), 25000);
-              const created = result?.created ?? 0;
-              body = { message: created > 0 ? evaluation.response : "Add a bit more detail and I can work with it.", created };
-            } catch (agentErr) {
-              return new Response(
-                JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
-                { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
-              );
-            }
-            isSkipped = true; // don't fall through to standard ingest
-          }
-
-          // Step 3: ingest if passed all gates
-          if (!isSkipped) {
-            const ingestText = hasTrustedUrl
-              ? `${message}\n\n[Contributor source: ${trustedDomain}]`
-              : message;
-
-            try {
-              const agent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-              await withTimeout(agent.setSystemPrompt(buildSystemPrompt(language)), 4000).catch(() => {});
-              const result = await withTimeout(agent.ingest(stampDate(ingestText)), 25000);
-              const created = result?.created ?? 0;
-
-              if (created === 0) {
-                body = { message: "Couldn't pull anything structured out of that — be more specific.", created: 0 };
-              } else {
-                body = { message: evaluation.response, created, trustedSource: hasTrustedUrl };
-              }
-            } catch (agentErr) {
-              return new Response(
-                JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
-                { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
-              );
-            }
-          }
-        }
-      }
-      }
-
-    } else if (action === 'ask') {
-      try {
-        let chatMessage = message;
-        let learnedImageUrl: string | null = null;
-        let learnedImageDescription: string | null = null;
-
-        // Image attached: analyze, upload, and learn it — simultaneously answer
-        if (imageBase64 && ANTHROPIC_API_KEY) {
-          const mime = (imageMimeType as string) || 'image/jpeg';
-          const imageBytes = Uint8Array.from(atob(imageBase64 as string), c => c.charCodeAt(0));
-          const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : 'jpg';
-          const filePath = `${user.id}/${Date.now()}.${ext}`;
-
-          // Analyze and upload in parallel
-          const [analysis, uploadResult] = await Promise.all([
-            analyzeImage(ANTHROPIC_API_KEY, imageBase64 as string, mime, message),
-            supabase.storage.from('images').upload(filePath, imageBytes, { contentType: mime, upsert: false }),
-          ]);
-
-          if (!analysis.safe) {
-            if (!uploadResult.error) supabase.storage.from('images').remove([filePath]).then(null, () => {});
-            body = { response: "That image contains content I can't engage with." };
-          } else {
-            if (!uploadResult.error && !analysis.personal) {
-              // Only add to collective if image has no personal identifiers (no handles, DMs, notifications, etc.)
-              const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(uploadResult.data.path);
-              learnedImageUrl = publicUrl;
-              learnedImageDescription = analysis.description;
-              supabase.from('collective_images').insert({ user_id: user.id, image_url: publicUrl, description: analysis.description }).then(null, () => {});
-            } else if (!uploadResult.error && analysis.personal) {
-              // Still uploaded but not shared — remove from storage
-              supabase.storage.from('images').remove([filePath]).then(null, () => {});
-            }
-            chatMessage = `[User shared an image: ${analysis.description}]${message ? `\n\nUser asks: ${message}` : ''}`;
-          }
-        }
-
-        if (!body) {
-          const chatAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
-          const ingestAgent = learnedImageUrl
-            ? new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID })
-            : null;
-
-          // Set system prompts in parallel
-          await Promise.all([
-            withTimeout(chatAgent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {}),
-            ingestAgent
-              ? withTimeout(ingestAgent.setSystemPrompt(buildSystemPrompt(language)), 10000).catch(() => {})
-              : Promise.resolve(),
-          ]);
-
-          const ingestText = learnedImageUrl && learnedImageDescription
-            ? stampDate(`[IMAGE: ${learnedImageUrl}]\n\n${learnedImageDescription}${message ? `\n\nContributor context: ${message}` : ''}`)
-            : '';  // Note: ask-path uploads are fire-and-forget so we don't have the row ID here
-
-          // Chat + ingest + image-term extraction all run in parallel
-          const [chatResult, , smartTerms] = await Promise.all([
-            withTimeout(chatAgent.chat(chatMessage, history), 25000),
-            ingestAgent && ingestText
-              ? withTimeout(ingestAgent.ingest(ingestText), 25000).catch(() => {})
-              : Promise.resolve(),
-            ANTHROPIC_API_KEY
-              ? extractImageSearchTerms(ANTHROPIC_API_KEY, typeof message === 'string' ? message : chatMessage)
-              : Promise.resolve([] as string[]),
-          ]);
-
-          // Guard: SDK may return response as object or undefined
-          const rawResponse: string = typeof chatResult?.response === 'string'
-            ? chatResult.response
-            : (chatResult?.response != null ? String(chatResult.response) : '');
-
-          // Step 1: Extract [SLATT_IMG:id] references from raw response BEFORE cleanup.
-          // UUID is not a URL so Antonlytics won't mangle it — this is the primary image lookup path.
-          const imgRefRegex = /\[SLATT_IMG:([a-f0-9-]{8,})\]/gi;
-          const slattImgIds: string[] = [...(rawResponse.matchAll(imgRefRegex) ?? [])].map(m => m[1]);
-
-          // Step 2: Strip all image-related tags from the response.
-          let cleanResponse = rawResponse
-            .replace(imgRefRegex, '')
-            .replace(/!\[[^\]]*\]\([^)]*\)/g, '')                  // markdown images
-            .replace(/\[(?:IMAGE|image|Image)[^\]]*\]/g, '')        // any [IMAGE: ...] tag
-            .replace(/https?:\/\/[a-z0-9]+\.supabase\.co\/storage\/v1\/object\/public\/images\/[^\s\])"'<>]*/gi, '')  // bare storage URLs
-            .replace(/IMAGE:\s*/gi, '')                             // orphaned IMAGE: keyword
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-
-          let allImages: { url: string; description: string }[] = [];
-
-          if (learnedImageUrl && learnedImageDescription) {
-            // User just uploaded an image — echo it back
-            allImages = [{ url: learnedImageUrl, description: learnedImageDescription }];
-          } else {
-            // Priority 1: direct ID lookup from [SLATT_IMG:id] tags in response
-            if (slattImgIds.length > 0) {
-              const { data: byId } = await supabase
+              const { data: existing } = await supabase
                 .from('collective_images')
-                .select('image_url, description')
-                .in('id', slattImgIds.slice(0, 2));
-              if (byId?.length) {
-                const seen = new Set<string>();
-                allImages = byId
-                  .filter((r: any) => { if (seen.has(r.image_url)) return false; seen.add(r.image_url); return true; })
-                  .map((r: any) => ({ url: r.image_url as string, description: r.description as string }));
-              }
+                .select('id')
+                .eq('image_url', learnedImageUrl)
+                .single();
+              imgRowId = existing?.id ?? null;
+            } catch { }
+          }
+
+          // Fire-and-forget ingest
+          const imgRef = imgRowId ? `[SLATT_IMG:${imgRowId}]` : '';
+          const ingestText = stampDate(`${imgRef ? imgRef + '\n\n' : ''}${analysis.description}${message ? `\n\nContributor context: ${message}` : ''}`);
+          const ingestAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+          withTimeout(ingestAgent.ingest(ingestText), 25000).catch(() => {});
+        }
+
+        const chatMessage = `[User shared an image: ${analysis.description}]${message ? `\n\nUser asks: ${message}` : ''}`;
+        const imgMemAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+
+        const [imgMemory, imgSearchTerms] = await Promise.all([
+          withTimeout(imgMemAgent.getMemory(chatMessage), 8000).catch(() => ({ entities: [], relationships: [] })),
+          ANTHROPIC_API_KEY
+            ? extractSearchTerms(ANTHROPIC_API_KEY, message || analysis.description).then(r => r.imageTerms.length ? r.imageTerms : analysis.description.split(' ').filter((w: string) => w.length >= 3).slice(0, 3))
+            : Promise.resolve([] as string[]),
+        ]);
+
+        const { response: rawResp, memImgIds: imgMemIds } = ANTHROPIC_API_KEY
+          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), chatMessage, history, imgMemory as any)
+          : { response: analysis.ack, memImgIds: [] as string[] };
+        const { clean, slattImgIds } = cleanResponse(rawResp);
+        const allImgTagIds = [...new Set([...imgMemIds, ...slattImgIds])];
+        const declinesMedia = DECLINE_RE.test(clean);
+
+        let allImages: { url: string; description: string }[] = [];
+        if (learnedImageUrl && learnedImageDescription) {
+          allImages = [{ url: learnedImageUrl, description: learnedImageDescription }];
+        } else if (!declinesMedia) {
+          if (allImgTagIds.length > 0) {
+            const { data: byId } = await supabase
+              .from('collective_images').select('image_url, description')
+              .in('id', allImgTagIds.slice(0, 2));
+            if (byId?.length) {
+              const seen = new Set<string>();
+              allImages = byId
+                .filter((r: any) => r.image_url && typeof r.image_url === 'string')
+                .filter((r: any) => { if (seen.has(r.image_url)) return false; seen.add(r.image_url); return true; })
+                .map((r: any) => ({ url: r.image_url as string, description: (r.description as string) || '' }));
             }
-
-            // Priority 2: description search using Claude-extracted terms (bilingual, intelligent).
-            // smartTerms comes from a parallel Claude Haiku call that normalizes any language to English keywords.
-            if (!allImages.length) {
-              const searchTerms = (smartTerms as string[])
-                .map((t: string) => t.replace(/[%_\\]/g, ''))
-                .filter(Boolean)
-                .slice(0, 3);
-
-              if (searchTerms.length > 0) {
-                const filters = searchTerms.map((t: string) => `description.ilike.%${t}%`).join(',');
-                const { data: matched } = await supabase
-                  .from('collective_images')
-                  .select('image_url, description')
-                  .or(filters)
-                  .limit(3);
-                if (matched?.length) {
-                  const urlSeen = new Set<string>();
-                  allImages = matched
-                    .filter((r: any) => { if (urlSeen.has(r.image_url)) return false; urlSeen.add(r.image_url); return true; })
-                    .slice(0, 2)
-                    .map((r: any) => ({ url: r.image_url as string, description: r.description as string }));
+          }
+          if (!allImages.length && (imgSearchTerms as string[]).length > 0) {
+            const terms = (imgSearchTerms as string[]).map((t: string) => t.replace(/[%_\\]/g, '')).filter((t: string) => t.length >= 2);
+            if (terms.length > 0) {
+              const lowerTerms = terms.map((t: string) => t.toLowerCase());
+              let matched: any[] | null = null;
+              if (terms.length >= 2) {
+                let andQ = supabase.from('collective_images').select('image_url, description');
+                for (const term of terms.slice(0, 3)) {
+                  andQ = (andQ as any).ilike('description', `%${term}%`);
                 }
+                const { data: andData } = await (andQ as any).limit(5);
+                if ((andData as any[])?.length) matched = andData as any[];
+              }
+              if (!matched) {
+                const expanded = [...new Set(terms.flatMap((t: string) => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter((w: string) => w.length >= 2).slice(0, 6);
+                const orFilters = expanded.map((t: string) => `description.ilike.%${t}%`).join(',');
+                const { data: orData } = await supabase.from('collective_images').select('image_url, description').or(orFilters).limit(8);
+                if ((orData as any[])?.length) matched = orData as any[];
+              }
+              if (matched?.length) {
+                const ranked = (matched as any[])
+                  .filter((r: any) => r.image_url && typeof r.image_url === 'string')
+                  .map((r: any) => ({
+                    url: r.image_url as string,
+                    description: (r.description as string) || '',
+                    score: lowerTerms.filter(t => ((r.description as string) || '').toLowerCase().includes(t)).length,
+                  }))
+                  .filter(r => r.score > 0)
+                  .sort((a, b) => b.score - a.score);
+                const seen = new Set<string>();
+                allImages = ranked
+                  .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true; })
+                  .slice(0, 1)
+                  .map(r => ({ url: r.url, description: r.description }));
               }
             }
           }
-
-          body = {
-            response: cleanResponse,
-            relevant_entities: chatResult.relevant_entities,
-            images: allImages,
-          };
         }
-      } catch (agentErr) {
-        return new Response(
-          JSON.stringify({ error: `Collective unavailable: ${(agentErr as Error).message}` }),
-          { status: 503, headers: { ...cors, 'Content-Type': 'application/json' } },
-        );
-      }
 
-    } else {
-      return new Response(JSON.stringify({ error: 'Invalid action.' }), { status: 400, headers: cors });
+        body = {
+          response: clean,
+          images: allImages,
+          links: [],
+        };
+      }
+      } // end duplicate-check else
     }
 
-    // ── Credit accounting ──────────────────────────────────────────────────────
-    if (profile.tier === 'free' && !isSkipped) {
-      let delta: number;
+    // ── Unified text path: always respond + conditionally ingest ───────────────
+    else {
+      const urls = parseURLs(message);
+      let hasTrustedUrl = false;
+      let trustedDomain: string | null = null;
+      for (const url of urls) {
+        const check = isTrustedURL(url);
+        if (check.trusted) { hasTrustedUrl = true; trustedDomain = check.domain; break; }
+      }
 
-      if (action === 'teach') {
-        const created = (body!.created as number) ?? 1;
-        const trusted = (body!.trustedSource as boolean) ?? false;
+      // Detect user correcting a previous identification
+      const isCorrectionMsg = CORRECTION_RE.test(message);
 
-        if (trusted) {
-          delta = -1; // trusted source: gain 1 credit
-        } else if (created === 0) {
-          delta = 2;  // useless teach: lose 2
-        } else if (created >= 5) {
-          delta = -1; // exceptional content: gain 1
-        } else if (created >= 3) {
-          delta = 0;  // good content: free
+      const memAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+
+      // 3 parallel calls: memory retrieval + evaluate + search term extraction
+      const [memoryResult, evaluation, searchTerms] = await Promise.all([
+        withTimeout(memAgent.getMemory(message), 10000).catch(() => ({ entities: [], relationships: [] })),
+        isCorrectionMsg
+          ? Promise.resolve({ verdict: 'ACCEPT' as EvalVerdict, isAnecdotal: true, response: '' })
+          : ANTHROPIC_API_KEY
+            ? evaluateAndRespond(ANTHROPIC_API_KEY, message, urls, hasTrustedUrl)
+            : Promise.resolve({ verdict: 'ACCEPT' as EvalVerdict, response: '' }),
+        ANTHROPIC_API_KEY
+          ? extractSearchTerms(ANTHROPIC_API_KEY, message)
+          : Promise.resolve({ imageTerms: [] as string[], contentTerms: [] as string[] }),
+      ]);
+      const { imageTerms, contentTerms } = searchTerms as { imageTerms: string[]; contentTerms: string[] };
+
+      // Claude generates the response with memory context — reliable system prompt following + SLATT_IMG tags
+      const { response: rawResp, memImgIds } = ANTHROPIC_API_KEY
+        ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), message, history, memoryResult as any)
+        : { response: '', memImgIds: [] as string[] };
+      const { clean, slattImgIds } = cleanResponse(rawResp);
+      const allImgTagIds = [...new Set([...memImgIds, ...slattImgIds])];
+      const declinesMedia = DECLINE_RE.test(clean);
+
+      // Image lookup — only runs when confirmed visual intent (imageTerms non-empty).
+      // No response-text fallback — avoids false positives from generic word matching.
+      const hasImageIntent = (imageTerms as string[]).length > 0;
+      let allImages: { url: string; description: string }[] = [];
+      if (!declinesMedia && hasImageIntent) {
+        // Layer 1: Tag IDs from memory/Claude (most precise — user asked about something already stored)
+        if (allImgTagIds.length > 0) {
+          const { data: byId } = await supabase
+            .from('collective_images').select('image_url, description')
+            .in('id', allImgTagIds.slice(0, 5));
+          if (byId?.length) {
+            const lowerTerms = (imageTerms as string[]).map((t: string) => t.toLowerCase());
+            const seen = new Set<string>();
+            // Rank by how many imageTerms match the description
+            const ranked = byId
+              .filter((r: any) => r.image_url && typeof r.image_url === 'string')
+              .map((r: any) => ({
+                url: r.image_url as string,
+                description: (r.description as string) || '',
+                score: lowerTerms.filter(t => ((r.description as string) || '').toLowerCase().includes(t)).length,
+              }))
+              .sort((a, b) => b.score - a.score);
+            allImages = ranked
+              .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true; })
+              .slice(0, 1)
+              .map(r => ({ url: r.url, description: r.description }));
+          }
+        }
+        // Layer 2: imageTerms DB search — AND-first for precision, OR fallback for recall
+        if (!allImages.length) {
+          const terms = (imageTerms as string[])
+            .map((t: string) => t.replace(/[%_\\]/g, ''))
+            .filter((t: string) => t.length >= 2);
+          if (terms.length > 0) {
+            const lowerTerms = terms.map((t: string) => t.toLowerCase());
+            let matched: any[] | null = null;
+            // AND search: all terms must appear in description (high precision)
+            if (terms.length >= 2) {
+              let andQ = supabase.from('collective_images').select('image_url, description');
+              for (const term of terms.slice(0, 3)) {
+                andQ = (andQ as any).ilike('description', `%${term}%`);
+              }
+              const { data: andData } = await (andQ as any).limit(5);
+              if ((andData as any[])?.length) matched = andData as any[];
+            }
+            // OR fallback if AND found nothing
+            if (!matched) {
+              const expanded = [...new Set(terms.flatMap((t: string) => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter((w: string) => w.length >= 2).slice(0, 6);
+              const orFilters = expanded.map((t: string) => `description.ilike.%${t}%`).join(',');
+              const { data: orData } = await supabase
+                .from('collective_images').select('image_url, description').or(orFilters).limit(10);
+              if ((orData as any[])?.length) matched = orData as any[];
+            }
+            if (matched?.length) {
+              // Rank by relevance: more matching terms = better match
+              const ranked = (matched as any[])
+                .filter((r: any) => r.image_url && typeof r.image_url === 'string')
+                .map((r: any) => ({
+                  url: r.image_url as string,
+                  description: (r.description as string) || '',
+                  score: lowerTerms.filter(t => ((r.description as string) || '').toLowerCase().includes(t)).length,
+                }))
+                .filter(r => r.score > 0)
+                .sort((a, b) => b.score - a.score);
+              const seen = new Set<string>();
+              allImages = ranked
+                .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true; })
+                .slice(0, 1)
+                .map(r => ({ url: r.url, description: r.description }));
+            }
+          }
+        }
+      }
+
+      // Link lookup — uses contentTerms only (music, articles, videos, etc.)
+      let allLinks: { url: string; description: string }[] = [];
+      if (!declinesMedia && (contentTerms as string[]).length > 0) {
+        try {
+          const terms = (contentTerms as string[]).map((t: string) => t.replace(/[%_\\]/g, '')).filter(Boolean);
+          const expanded = [...new Set(terms.flatMap(t => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter(w => w.length >= 2).slice(0, 6);
+          const linkFilters = expanded.map((t: string) => `description.ilike.%${t}%`).join(',');
+          const { data: matchedLinks } = await supabase
+            .from('collective_links').select('url, description').or(linkFilters).limit(2);
+          if (matchedLinks?.length) {
+            const seen = new Set<string>();
+            allLinks = (matchedLinks as any[])
+              .filter((r: any) => r.url && typeof r.url === 'string')
+              .filter((r: any) => { if (seen.has(r.url)) return false; seen.add(r.url); return true; })
+              .map((r: any) => ({ url: r.url as string, description: (r.description as string) || '' }));
+          }
+        } catch { }
+      }
+
+      // Always store URLs — a shared link is collective knowledge regardless of message type
+      if (urls.length > 0) storeLinks(supabase, user.id, urls, message).catch(() => {});
+
+      // Ingest: store everything that isn't spam/misinformation and has substance.
+      // CHAT with content (music share, casual recommendation, experience) is worth learning.
+      // Only skip: REJECT (dangerous misinfo), AD (spam), and trivially short messages with no URL.
+      const isWorthLearning = !['REJECT', 'AD'].includes(evaluation.verdict ?? '') &&
+        (message.trim().length > 15 || urls.length > 0);
+      if (isWorthLearning) {
+        let ingestText: string;
+        if (isCorrectionMsg) {
+          const prevAgentMsg = [...(history as HistoryMessage[])].reverse().find(h => h.role === 'assistant');
+          ingestText = `[ANECDOTAL EXPERIENCE] Contributor correction — previously identified as: "${(prevAgentMsg?.content ?? '').slice(0, 200)}" → contributor confirms it is actually: ${message}`;
+        } else if (evaluation.isAnecdotal) {
+          ingestText = `[ANECDOTAL EXPERIENCE] Contributor's personal account: ${message}`;
+        } else if (hasTrustedUrl) {
+          ingestText = `${message}\n\n[Contributor source: ${trustedDomain}]`;
+        } else if (evaluation.verdict === 'NEEDS_EVIDENCE') {
+          ingestText = `[UNVERIFIED — contributor claim, no source provided] ${message}`;
         } else {
-          delta = 1;  // normal: costs 1
+          ingestText = message;
         }
-        const creditChange = 1 - delta; // positive = user gained vs. baseline
-        if (creditChange !== 0) body!.creditChange = creditChange;
-      } else {
-        delta = 1; // asks always cost 1
+        const ingestAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
+        withTimeout(ingestAgent.ingest(stampDate(ingestText)), 25000).catch(() => {});
       }
 
-      await supabase
-        .from('profiles')
-        .update({ queries_today: profile.queries_today + delta })
-        .eq('id', user.id);
+      body = {
+        response: clean,
+        images: allImages,
+        links: allLinks,
+      };
     }
+
+    // ── Credit accounting (every request costs 1 query, both tiers) ──────────
+    await supabase.from('profiles')
+      .update({ queries_today: profile.queries_today + 1 })
+      .eq('id', user.id);
 
     return new Response(JSON.stringify(body!), {
       status: 200,

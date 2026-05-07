@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, Platform, KeyboardAvoidingView, Alert,
   ActivityIndicator, Modal, Keyboard, Pressable, Linking, Share,
-  Animated as RNAnimated, PanResponder, Image, Dimensions,
+  Animated as RNAnimated, PanResponder, Image, Dimensions, AppState,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,11 +20,11 @@ import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
 import { upsertConversation, consumePendingResume } from '@/lib/history';
-import { FREE_DAILY_LIMIT, STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
+import { FREE_DAILY_LIMIT, PRO_DAILY_LIMIT, STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
 import { setupIAP, purchasePlan, type PlanKey } from '@/lib/iap';
 import { useProfile } from '@/lib/useProfile';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
-import { t, getLangName } from '@/lib/i18n';
+import { getLangName } from '@/lib/i18n';
 import { useLanguage } from '@/lib/useLanguage';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -160,6 +160,7 @@ type Message = {
   replyToId?: string;
   imageUri?: string;
   images?: { url: string; description: string }[];
+  links?: { url: string; description: string }[];
 };
 
 type PendingImage = { uri: string; base64: string; mimeType: string };
@@ -171,6 +172,7 @@ const ImageGallery = memo(function ImageGallery({
 }: {
   images: { url: string; description: string }[];
 }) {
+  const { t } = useLanguage();
   // Deduplicate by URL before rendering
   const seen = new Set<string>();
   const images = rawImages.filter(img => { if (seen.has(img.url)) return false; seen.add(img.url); return true; });
@@ -325,6 +327,18 @@ const ig = StyleSheet.create({
 
 // ── Link preview ──────────────────────────────────────────────────────────────
 
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
+const SUPABASE_URL_LPC = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+
+export function extractFirstPreviewURL(text: string): string | null {
+  const matches = text.match(URL_RE) ?? [];
+  return matches.find(u =>
+    !u.includes('supabase.co/storage') &&
+    !u.includes('supabase.co/auth') &&
+    u.startsWith('https://')
+  ) ?? null;
+}
+
 type PreviewData = {
   type: 'youtube' | 'spotify' | 'apple_music' | 'twitter' | 'link';
   url: string;
@@ -336,24 +350,13 @@ type PreviewData = {
 } | null;
 
 const previewCache = new Map<string, PreviewData>();
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
-
-function extractFirstPreviewURL(text: string): string | null {
-  const matches = text.match(URL_RE) ?? [];
-  return matches.find(u =>
-    !u.includes('supabase.co/storage') &&
-    !u.includes('supabase.co/auth') &&
-    u.startsWith('https://')
-  ) ?? null;
-}
 
 const TYPE_META: Record<string, { color: string; label: string; icon: string }> = {
   youtube:     { color: '#FF0000', label: 'YouTube',     icon: '▶' },
   spotify:     { color: '#1DB954', label: 'Spotify',     icon: '♫' },
   apple_music: { color: '#FC3C44', label: 'Apple Music', icon: '♫' },
   twitter:     { color: '#1D9BF0', label: 'X (Twitter)', icon: '𝕏' },
-  link:        { color: 'rgba(255,255,255,0.35)', label: '',   icon: '↗' },
+  link:        { color: 'rgba(255,255,255,0.35)', label: '', icon: '↗' },
 };
 
 function LinkPreviewCard({ url }: { url: string }) {
@@ -366,7 +369,7 @@ function LinkPreviewCard({ url }: { url: string }) {
     let cancelled = false;
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { previewCache.set(url, null); if (!cancelled) setData(null); return; }
-      fetch(`${SUPABASE_URL}/functions/v1/link-preview`, {
+      fetch(`${SUPABASE_URL_LPC}/functions/v1/link-preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({ url }),
@@ -378,9 +381,7 @@ function LinkPreviewCard({ url }: { url: string }) {
     return () => { cancelled = true; };
   }, [url]);
 
-  if (data === 'loading') {
-    return <View style={lpc.skeleton} />;
-  }
+  if (data === 'loading') return <View style={lpc.skeleton} />;
   if (!data || (!data.title && !data.image)) return null;
 
   const meta = TYPE_META[data.type] ?? TYPE_META.link;
@@ -389,39 +390,22 @@ function LinkPreviewCard({ url }: { url: string }) {
 
   return (
     <TouchableOpacity style={lpc.card} onPress={() => Linking.openURL(url)} activeOpacity={0.85}>
-      {/* Wide thumbnail (YouTube / generic with image) */}
       {!isHorizontal && !isTwitter && data.image ? (
         <Image source={{ uri: data.image }} style={lpc.thumbWide} resizeMode="cover" />
       ) : null}
-
       <View style={[lpc.body, isHorizontal && { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
-        {/* Square thumbnail (Spotify / Apple Music) */}
         {isHorizontal && data.image ? (
           <Image source={{ uri: data.image }} style={lpc.thumbSquare} resizeMode="cover" />
         ) : null}
-
         <View style={{ flex: 1 }}>
-          {/* Service badge */}
           <View style={lpc.badge}>
             <Text style={[lpc.badgeIcon, { color: meta.color }]}>{meta.icon}</Text>
             {meta.label ? <Text style={[lpc.badgeLabel, { color: meta.color }]}>{meta.label}</Text> : null}
           </View>
-
-          {data.title ? (
-            <Text style={lpc.title} numberOfLines={2}>{data.title}</Text>
-          ) : null}
-
-          {data.author && !isHorizontal ? (
-            <Text style={lpc.sub} numberOfLines={1}>{data.author}</Text>
-          ) : null}
-
-          {data.description && !isHorizontal ? (
-            <Text style={lpc.desc} numberOfLines={2}>{data.description}</Text>
-          ) : null}
-
-          {data.siteName && !meta.label ? (
-            <Text style={lpc.site} numberOfLines={1}>{data.siteName}</Text>
-          ) : null}
+          {data.title ? <Text style={lpc.title} numberOfLines={2}>{data.title}</Text> : null}
+          {data.author && !isHorizontal ? <Text style={lpc.sub} numberOfLines={1}>{data.author}</Text> : null}
+          {data.description && !isHorizontal ? <Text style={lpc.desc} numberOfLines={isTwitter ? 6 : 2}>{data.description}</Text> : null}
+          {data.siteName && !meta.label ? <Text style={lpc.site} numberOfLines={1}>{data.siteName}</Text> : null}
         </View>
       </View>
     </TouchableOpacity>
@@ -429,17 +413,8 @@ function LinkPreviewCard({ url }: { url: string }) {
 }
 
 const lpc = StyleSheet.create({
-  skeleton: {
-    height: 72, borderRadius: 16, marginTop: 8,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    width: SCREEN_W - 32,
-  },
-  card: {
-    marginTop: 8, borderRadius: 16, overflow: 'hidden',
-    backgroundColor: '#0C0C0C',
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)',
-    width: SCREEN_W - 32,
-  },
+  skeleton: { height: 72, borderRadius: 16, marginTop: 8, backgroundColor: 'rgba(255,255,255,0.04)', width: SCREEN_W - 32 },
+  card: { marginTop: 8, borderRadius: 16, overflow: 'hidden', backgroundColor: '#0C0C0C', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)', width: SCREEN_W - 32 },
   thumbWide: { width: '100%', height: 180 },
   thumbSquare: { width: 64, height: 64, borderRadius: 10 },
   body: { padding: 12 },
@@ -562,9 +537,11 @@ const td = StyleSheet.create({
 // ── Paywall modal ─────────────────────────────────────────────────────────────
 
 const PRO_FEATURES = [
-  `Unlimited queries per day (Free plan: ${FREE_DAILY_LIMIT}/day)`,
-  'Access all collective knowledge — answers from real Pro member teachings',
-  'Teach the collective — your insights reach every Pro member',
+  'Unlimited daily queries — no caps, ever',
+  'Image identification & visual search',
+  'Link previews from the collective',
+  'Full access to everything the collective knows',
+  'Teach the collective — your knowledge reaches everyone',
 ];
 
 function PaywallModal({
@@ -576,6 +553,7 @@ function PaywallModal({
   onUpgrade: (plan: 'monthly' | 'annual') => void;
   checkoutLoading: 'monthly' | 'annual' | null;
 }) {
+  const { t } = useLanguage();
   const [legalModal, setLegalModal] = useState<'terms' | 'privacy' | null>(null);
 
   return (
@@ -740,7 +718,7 @@ export default function ChatScreen() {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const { profile, reloadProfile } = useProfile();
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<PlanKey | null>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -756,6 +734,13 @@ export default function ChatScreen() {
     const teardown = setupIAP();
     return teardown;
   }, []);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') reloadProfile();
+    });
+    return () => sub.remove();
+  }, [reloadProfile]);
 
   useFocusEffect(useCallback(() => {
     const conv = consumePendingResume();
@@ -782,11 +767,12 @@ export default function ChatScreen() {
     if (input.length > 2) setMode(detectMode(input));
   }, [input]);
 
-  const queriesLeft = profile?.tier === 'free'
-    ? Math.min(FREE_DAILY_LIMIT, Math.max(0, FREE_DAILY_LIMIT - (profile.queries_today ?? 0)))
+  const dailyLimit = profile?.tier === 'pro' ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT;
+  const queriesLeft = profile
+    ? Math.min(dailyLimit, Math.max(0, dailyLimit - (profile.queries_today ?? 0)))
     : null;
 
-  const isAtLimit = profile?.tier === 'free' && queriesLeft !== null && queriesLeft <= 0;
+  const isAtLimit = queriesLeft !== null && queriesLeft <= 0;
 
   const persistConversation = (msgs: Message[]) => {
     if (msgs.length < 2) return;
@@ -866,7 +852,6 @@ export default function ChatScreen() {
             Authorization: `Bearer ${session?.access_token}`,
           },
           body: JSON.stringify({
-            action: mode,
             message: messageForAgent || (capturedImage ? '(image)' : ''),
             history,
             language: getLangName(),
@@ -888,9 +873,7 @@ export default function ChatScreen() {
       try { json = await res.json(); } catch { }
       if (!res.ok) throw new Error(json.error ?? json.message ?? `Server error ${res.status}`);
 
-      const rawContent = mode === 'teach'
-        ? (json.message ?? 'Got it, teaching the collective.')
-        : (json.response ?? '...');
+      const rawContent = json.response ?? json.message ?? '...';
       // Safety net: strip any [IMAGE: ...] tags that leaked through from the edge function
       const content = rawContent
         .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
@@ -903,6 +886,7 @@ export default function ChatScreen() {
         content,
         mode,
         images: json.images?.length ? json.images : undefined,
+        links: json.links?.length ? json.links : undefined,
       };
       const final = [...withUser.filter(m => !m.isPending), agentMsg];
       if (mounted.current) {
@@ -991,9 +975,8 @@ export default function ChatScreen() {
             {profile === null && (
               <View style={s.headerSkeleton} />
             )}
-            {profile?.tier === 'pro' && <ProBadge />}
-            {profile?.tier === 'free' && queriesLeft !== null && (
-              <QueryRing left={queriesLeft} total={FREE_DAILY_LIMIT} onPress={() => setShowPaywall(true)} />
+            {queriesLeft !== null && (
+              <QueryRing left={queriesLeft} total={dailyLimit} onPress={() => setShowPaywall(true)} />
             )}
             {messages.length > 0 && (
               <TouchableOpacity onPress={newChat} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -1039,7 +1022,11 @@ export default function ChatScreen() {
           >
             {messages.map(msg => {
               const replyMsg = msg.replyToId ? messages.find(m => m.id === msg.replyToId) : undefined;
-              const previewUrl = !msg.isPending && !msg.isError ? extractFirstPreviewURL(msg.content) : null;
+              const previewUrl = !msg.isPending && !msg.isError && !msg.links?.length
+                ? extractFirstPreviewURL(msg.content) : null;
+              const displayContent = previewUrl
+                ? msg.content.replace(previewUrl, '').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim()
+                : msg.content;
 
               return msg.role === 'user' ? (
                 <View key={msg.id}>
@@ -1065,8 +1052,8 @@ export default function ChatScreen() {
                           {msg.imageUri && (
                             <Image source={{ uri: msg.imageUri }} style={s.msgImage} resizeMode="cover" />
                           )}
-                          {msg.content !== '📷 Image' && (
-                            <Text style={s.msgTextUser}>{msg.content}</Text>
+                          {msg.content !== '📷 Image' && !!displayContent && (
+                            <Text style={s.msgTextUser}>{displayContent}</Text>
                           )}
                         </LinearGradient>
                       </TouchableOpacity>
@@ -1101,20 +1088,23 @@ export default function ChatScreen() {
                           <ActivityIndicator size="small" color={T.muted} />
                           <Text style={[s.msgTextAgent, { color: T.muted }]}>{msg.content}</Text>
                         </View>
-                      ) : (
+                      ) : displayContent ? (
                         <TouchableOpacity
                           activeOpacity={1}
                           onLongPress={() => Share.share({ message: msg.content })}
                           delayLongPress={400}
                         >
-                          <MarkdownText text={msg.content} style={s.msgTextAgent} />
+                          <MarkdownText text={displayContent} style={s.msgTextAgent} />
                         </TouchableOpacity>
-                      )}
+                      ) : null}
                     </Animated.View>
                   </SwipeableMessage>
                   {msg.images && msg.images.length > 0 && (
                     <ImageGallery images={msg.images} />
                   )}
+                  {msg.links && msg.links.length > 0 && msg.links.map((link, i) => (
+                    <LinkPreviewCard key={`link-${i}`} url={link.url} />
+                  ))}
                   {previewUrl && <LinkPreviewCard url={previewUrl} />}
                 </View>
               );

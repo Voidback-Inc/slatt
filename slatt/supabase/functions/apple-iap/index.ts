@@ -35,10 +35,15 @@ Deno.serve(async (req) => {
         if (rcRes.ok) {
           const rcData = await rcRes.json();
           const entitlements = rcData.subscriber?.entitlements ?? {};
-          const isActive = Object.values(entitlements).some(
+          const values = Object.values(entitlements);
+          // Only reject if RC has entitlement records that are all clearly expired.
+          // If values is empty the purchase may still be processing — grant and let
+          // the listener or a later restore sync the correct state.
+          const hasAny = values.length > 0;
+          const isActive = values.some(
             (e: any) => e.expires_date === null || new Date(e.expires_date) > new Date()
           );
-          if (!isActive) {
+          if (hasAny && !isActive) {
             return new Response(JSON.stringify({ error: 'No active entitlement' }), {
               status: 402, headers: { ...cors, 'Content-Type': 'application/json' },
             });
