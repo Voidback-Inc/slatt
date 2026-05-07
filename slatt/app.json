@@ -60,6 +60,17 @@
         {
           "faceIDPermission": "Allow slatt to use Face ID to confirm your identity when deleting your account."
         }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsWebPageWithMaxCount": 1,
+            "NSExtensionActivationSupportsText": 1
+          },
+          "androidIntentFilters": ["text/*"]
+        }
       ]
     ],
     "experiments": {

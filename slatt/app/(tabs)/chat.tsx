@@ -20,6 +20,7 @@ import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
 import { upsertConversation, consumePendingResume } from '@/lib/history';
+import { shareEvents } from '@/lib/shareEvents';
 import { FREE_DAILY_LIMIT, PRO_DAILY_LIMIT, STRIPE_MONTHLY_LABEL, STRIPE_ANNUAL_LABEL, STRIPE_ANNUAL_SAVE } from '@/lib/constants';
 import { setupIAP, purchasePlan, type PlanKey } from '@/lib/iap';
 import { useProfile } from '@/lib/useProfile';
@@ -795,6 +796,80 @@ export default function ChatScreen() {
         })),
     }).catch(() => {});
   };
+
+  const processShare = useCallback(async (shareText: string) => {
+    if (isAtLimit) { setShowPaywall(true); return; }
+
+    const isUrl = /^https?:\/\//.test(shareText);
+    const userMsg: Message = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: shareText,
+      mode: 'ask',
+    };
+    const pendingMsg: Message = { id: `p-${Date.now()}`, role: 'agent', content: '', mode: 'ask', isPending: true };
+
+    setMessages(prev => {
+      const withUser = [...prev, userMsg, pendingMsg];
+      return withUser;
+    });
+    setSending(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/analyze-share`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+          body: JSON.stringify({
+            ...(isUrl ? { url: shareText } : { text: shareText }),
+            language: getLangName(),
+          }),
+        },
+      );
+
+      if (res.status === 429) {
+        setMessages(prev => prev.filter(m => !m.isPending));
+        setShowPaywall(true);
+        reloadProfile();
+        return;
+      }
+
+      const json: any = res.ok ? await res.json() : {};
+      if (!res.ok) throw new Error(json.error ?? `Error ${res.status}`);
+
+      const agentMsg: Message = {
+        id: `a-${Date.now()}`,
+        role: 'agent',
+        content: json.analysis ?? '...',
+        mode: 'ask',
+        links: isUrl ? [{ url: json.url ?? shareText, description: [json.author, json.title].filter(Boolean).join(' · ') || json.platform || '' }] : undefined,
+      };
+
+      setMessages(prev => {
+        const final = [...prev.filter(m => !m.isPending), agentMsg];
+        persistConversation(final);
+        return final;
+      });
+      reloadProfile();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not analyze this content.';
+      setMessages(prev => [
+        ...prev.filter(m => !m.isPending),
+        { id: `e-${Date.now()}`, role: 'agent', content: msg, mode: 'ask', isError: true },
+      ]);
+    } finally {
+      if (mounted.current) setSending(false);
+    }
+  }, [isAtLimit, reloadProfile]);
+
+  // Listen for shares from iOS share sheet
+  useEffect(() => {
+    return shareEvents.on((text) => {
+      setTimeout(() => processShare(text), 150);
+    });
+  }, [processShare]);
 
   const retryLast = useCallback(() => {
     if (!lastSentRef.current || sending) return;

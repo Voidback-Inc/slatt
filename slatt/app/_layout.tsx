@@ -5,8 +5,10 @@ import { StatusBar } from 'expo-status-bar';
 import { View, Text, Animated, StyleSheet } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import 'react-native-reanimated';
+import { useShareIntentContext, ShareIntentProvider } from 'expo-share-intent';
 import { supabase } from '@/lib/supabase';
 import { loadLang } from '@/lib/i18n';
+import { shareEvents } from '@/lib/shareEvents';
 import type { Session } from '@supabase/supabase-js';
 
 SplashScreen.preventAutoHideAsync();
@@ -21,6 +23,23 @@ function AuthGate({ session }: { session: Session | null }) {
     if (!session && !inAuth) router.replace('/(auth)/login');
     else if (session && !inTabs) router.replace('/(tabs)/chat');
   }, [session, segments]);
+
+  return null;
+}
+
+function ShareIntentHandler({ session }: { session: Session | null }) {
+  const router = useRouter();
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
+
+  useEffect(() => {
+    if (!hasShareIntent) return;
+    const text = shareIntent?.text?.trim() ?? shareIntent?.files?.[0]?.path ?? '';
+    if (!text) return;
+    resetShareIntent();
+    // Emit to chat screen; navigate there if user is logged in
+    shareEvents.emit(text);
+    if (session) router.navigate('/(tabs)/chat');
+  }, [hasShareIntent, shareIntent]);
 
   return null;
 }
@@ -96,15 +115,18 @@ export default function RootLayout() {
 
   return (
     <View style={styles.root}>
-      <ThemeProvider value={DarkTheme}>
-        {initialized && <AuthGate session={session} />}
-        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-          <Stack.Screen name="index" />
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-        </Stack>
-        <StatusBar style="light" />
-      </ThemeProvider>
+      <ShareIntentProvider>
+        <ThemeProvider value={DarkTheme}>
+          {initialized && <AuthGate session={session} />}
+          <ShareIntentHandler session={session} />
+          <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+            <Stack.Screen name="index" />
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+          </Stack>
+          <StatusBar style="light" />
+        </ThemeProvider>
+      </ShareIntentProvider>
 
       {!splashDone && (
         <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
