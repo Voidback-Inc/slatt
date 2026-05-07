@@ -733,6 +733,7 @@ Deno.serve(async (req) => {
 
       // Link lookup — Layer 1: extract URLs from Antonlytics memory, ranked by relevance to query terms
       const MEDIA_URL_RE = /https?:\/\/(?:(?:www\.)?youtube\.com|youtu\.be|open\.spotify\.com|spotify\.com|soundcloud\.com|music\.apple\.com|tidal\.com|music\.youtube\.com|deezer\.com)[^\s"'\\,\]>)]+/gi;
+      const STOP_WORDS = /^(the|a|an|is|it|in|on|at|to|of|and|or|but|for|with|from|this|that|these|those|what|who|how|when|where|why|just|so|do|did|does|i|me|my|you|your|we|ur)$/i;
 
       // Scoring helper: short terms (≤3 chars) must match as a whole word against entity name/id,
       // not as a substring of the full JSON (avoids "nn" matching "running", "connection", etc.)
@@ -742,7 +743,6 @@ Deno.serve(async (req) => {
         const propsStr = JSON.stringify(entity.properties ?? {}).toLowerCase();
         return terms.reduce((score: number, t: string) => {
           if (t.length <= 3) {
-            // Whole-word / exact-name match only
             const wbRe = new RegExp(`(?:^|[\\s",:{\\[])${t}(?:$|[\\s",:\\]}])`, 'i');
             return score + (name === t || name.startsWith(t + ' ') || wbRe.test(propsStr) ? 1 : 0);
           }
@@ -779,7 +779,6 @@ Deno.serve(async (req) => {
       // Link lookup — Layer 2: collective_links DB search using linkTerms (broad named-subject detection)
       // Short-message fallback: if the model returned nothing (e.g. "nn", "wsp") try the raw words.
       // Only fire when it's not a pure CHAT message — don't look for links on "night night".
-      const STOP_WORDS = /^(the|a|an|is|it|in|on|at|to|of|and|or|but|for|with|from|this|that|these|those|what|who|how|when|where|why|just|so|do|did|does|i|me|my|you|your|we|ur)$/i;
       const rawFallbackTerms: string[] = (
         evaluation.verdict !== 'CHAT' &&
         (linkTerms as string[]).length === 0 &&
