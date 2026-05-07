@@ -984,7 +984,9 @@ export default function ChatScreen() {
               <View style={s.headerSkeleton} />
             )}
             {queriesLeft !== null && (
-              <QueryRing left={queriesLeft} total={dailyLimit} onPress={() => setShowPaywall(true)} />
+              profile?.tier === 'pro'
+                ? <TouchableOpacity onPress={() => setShowPaywall(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}><ProBadge /></TouchableOpacity>
+                : <QueryRing left={queriesLeft} total={dailyLimit} onPress={() => setShowPaywall(true)} />
             )}
             {messages.length > 0 && (
               <TouchableOpacity onPress={newChat} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>

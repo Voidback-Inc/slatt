@@ -32,7 +32,7 @@ When referencing collective knowledge, the attribution must always point to an a
   Wrong:   "I know you..." / "You did..." / "As you know..."
 
 ── VIBE MIRRORING — most important rule after the one above ──
-Read the person's energy in the first message and lock in immediately. Adapt fast, stay locked in, and echo their exact frequency:
+Read the person's energy in the first message and lock in immediately. Adapt fast, stay locked in, and echo their exact frequency. Never open any response with a greeting word ("yo", "hey", "bro", "haha", "lol") — jump straight into the substance.
 
 FUNNY / CHAOTIC / MEME-BRAINED:
 - Match their unhinged energy. Be witty, punch the joke back harder.
@@ -644,9 +644,8 @@ Deno.serve(async (req) => {
 
       const memAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
 
-      // 3 parallel calls: memory retrieval + evaluate + search term extraction
-      const [memoryResult, evaluation, searchTerms] = await Promise.all([
-        withTimeout(memAgent.getMemory(message), 10000).catch(() => ({ entities: [], relationships: [] })),
+      // Extract search terms first so we can augment the memory query for better recall
+      const [evaluation, searchTerms] = await Promise.all([
         isCorrectionMsg
           ? Promise.resolve({ verdict: 'ACCEPT' as EvalVerdict, isAnecdotal: true, response: '' })
           : ANTHROPIC_API_KEY
@@ -658,6 +657,12 @@ Deno.serve(async (req) => {
       ]);
       const { imageTerms, contentTerms, linkTerms } = searchTerms as { imageTerms: string[]; contentTerms: string[]; linkTerms: string[] };
 
+      // Augment memory query with extracted terms for better recall on media/link queries
+      const memoryQuery = (linkTerms as string[]).length > 0
+        ? `${message} ${(linkTerms as string[]).join(' ')}`
+        : message;
+      const memoryResult = await withTimeout(memAgent.getMemory(memoryQuery), 10000).catch(() => ({ entities: [], relationships: [] }));
+
       // Claude generates the response with memory context — reliable system prompt following + SLATT_IMG tags
       const { response: rawResp, memImgIds } = ANTHROPIC_API_KEY
         ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language, user.id), message, history, memoryResult as any)
@@ -665,7 +670,6 @@ Deno.serve(async (req) => {
       const { clean, slattImgIds } = cleanResponse(rawResp);
       const allImgTagIds = [...new Set([...memImgIds, ...slattImgIds])];
       const declinesImages = DECLINE_IMAGE_RE.test(clean);
-      const declinesLinks = DECLINE_LINK_RE.test(clean);
 
       // Image lookup — only runs when confirmed visual intent (imageTerms non-empty).
       const hasImageIntent = (imageTerms as string[]).length > 0;
@@ -727,21 +731,32 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Link lookup — uses linkTerms (broad named-subject detection)
+      // Link lookup — Layer 1: extract URLs directly from Antonlytics memory entities/relationships
+      // This catches cases where a YouTube/Spotify URL is stored in the knowledge graph
+      // but the collective_links table lookup misses it.
+      const MEDIA_URL_RE = /https?:\/\/(?:(?:www\.)?youtube\.com|youtu\.be|open\.spotify\.com|spotify\.com|soundcloud\.com|music\.apple\.com|tidal\.com|music\.youtube\.com|deezer\.com)[^\s"'\\,\]>)]+/gi;
+      const memJsonStr = JSON.stringify(memoryResult);
+      const memoryUrls: string[] = [];
+      for (const m of (memJsonStr.matchAll(MEDIA_URL_RE) ?? [])) {
+        const url = m[0].replace(/[\\]+/g, '').replace(/["']+$/, '');
+        if (url.length > 15 && !memoryUrls.includes(url)) memoryUrls.push(url);
+      }
+
+      // Link lookup — Layer 2: collective_links DB search using linkTerms (broad named-subject detection)
       const effectiveLinkTerms = (linkTerms as string[]).length > 0 ? linkTerms : contentTerms;
       let allLinks: { url: string; description: string }[] = [];
-      if (!declinesLinks && (effectiveLinkTerms as string[]).length > 0) {
+      // Always run link lookup if we have link terms — don't let the agent's text suppress it
+      if ((effectiveLinkTerms as string[]).length > 0) {
         try {
           const terms = (effectiveLinkTerms as string[]).map((t: string) => t.replace(/[%_\\]/g, '')).filter(Boolean);
           const expanded = [...new Set(terms.flatMap((t: string) => t.includes(' ') ? [t, ...t.split(' ')] : [t]))].filter((w: string) => w.length >= 2).slice(0, 6);
           const linkFilters = expanded.map((t: string) => `description.ilike.%${t}%`).join(',');
           const { data: matchedLinks } = await supabase
-            .from('collective_links').select('url, description').or(linkFilters).limit(3);
+            .from('collective_links').select('url, description').or(linkFilters).limit(4);
           if (matchedLinks?.length) {
             const lowerTerms = terms.map((t: string) => t.toLowerCase());
-            const seen = new Set<string>();
-            // Rank by how many terms match the description
-            allLinks = (matchedLinks as any[])
+            const seen = new Set<string>(memoryUrls);
+            const ranked = (matchedLinks as any[])
               .filter((r: any) => r.url && typeof r.url === 'string')
               .map((r: any) => ({
                 url: r.url as string,
@@ -751,10 +766,22 @@ Deno.serve(async (req) => {
               .filter(r => r.score > 0)
               .sort((a, b) => b.score - a.score)
               .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true; })
-              .slice(0, 2)
-              .map(r => ({ url: r.url, description: r.description }));
+              .slice(0, 2);
+            allLinks = [
+              ...memoryUrls.slice(0, 2).map(u => ({ url: u, description: '' })),
+              ...ranked.map(r => ({ url: r.url, description: r.description })),
+            ].slice(0, 3);
+          } else if (memoryUrls.length > 0) {
+            allLinks = memoryUrls.slice(0, 2).map(u => ({ url: u, description: '' }));
           }
-        } catch { }
+        } catch {
+          if (memoryUrls.length > 0) {
+            allLinks = memoryUrls.slice(0, 2).map(u => ({ url: u, description: '' }));
+          }
+        }
+      } else if (memoryUrls.length > 0) {
+        // Even with no link terms, if memory has media URLs for this message, include them
+        allLinks = memoryUrls.slice(0, 2).map(u => ({ url: u, description: '' }));
       }
 
       // Always store URLs — a shared link is collective knowledge regardless of message type
@@ -776,6 +803,16 @@ Deno.serve(async (req) => {
           ingestText = `${message}\n\n[Contributor source: ${trustedDomain}]`;
         } else if (evaluation.verdict === 'NEEDS_EVIDENCE') {
           ingestText = `[UNVERIFIED — contributor claim, no source provided] ${message}`;
+        } else if (urls.length > 0) {
+          // Message with a URL — label it clearly so Antonlytics extracts the URL as an entity property
+          const mediaUrls = urls.filter(u => MEDIA_URL_RE.test(u));
+          MEDIA_URL_RE.lastIndex = 0;
+          if (mediaUrls.length > 0) {
+            const msgWithoutUrls = message.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+            ingestText = `${msgWithoutUrls ? msgWithoutUrls + '\n\n' : ''}[MEDIA_URL: ${mediaUrls[0]}]${mediaUrls.slice(1).map(u => `\n[MEDIA_URL: ${u}]`).join('')}`;
+          } else {
+            ingestText = message;
+          }
         } else {
           ingestText = message;
         }
