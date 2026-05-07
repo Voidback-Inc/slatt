@@ -13,7 +13,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.voidback.slatt",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "version": "1.5.0",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
