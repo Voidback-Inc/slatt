@@ -20,7 +20,8 @@
         "com.apple.security.application-groups": ["group.com.voidback.slatt"]
       },
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["slatt"]
       }
     },
     "android": {
@@ -72,7 +73,8 @@
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
             "NSExtensionActivationSupportsText": true
           },
-          "androidIntentFilters": ["text/*"]
+          "androidIntentFilters": ["text/*"],
+          "scheme": "slatt"
         }
       ]
     ],
