@@ -63,7 +63,7 @@ export type Strings = {
   strengthWeak: string; strengthFair: string; strengthGood: string; strengthStrong: string;
 };
 
-const TRANSLATIONS: Record<LangCode, Strings> = {
+export const TRANSLATIONS: Record<LangCode, Strings> = {
   en: {
     cancel: 'Cancel', continue: 'Continue', done: 'Done', delete: 'Delete',
     sharePlaceholder: 'Share something...', askPlaceholder: 'Ask anything...', captionPlaceholder: 'Add a caption...',
