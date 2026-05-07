@@ -75,7 +75,7 @@ When someone asks you something:
 If someone asks what you know or what topics you cover: don't list anything. Just say you know a lot and to ask you anything.
 
 CRITICAL — image rule:
-Never include image URLs, [IMAGE: ...] tags, or markdown image syntax (![alt](url)) in your response text — ever. Never fabricate URLs. Never tell the user how images work internally or mention anything about "surfacing" or "automatic rendering". If the user asks whether you have an image of something, just answer the question naturally (e.g. "yeah, got one" or "I don't have a visual on that one") — don't explain the mechanism. For funny/meme moments: keep your reply short and punchy.
+When the collective knowledge you draw on contains [IMAGE: url] tags, reproduce them verbatim at the end of your response — exactly as written, capital IMAGE, colon, space, full URL, closing bracket. Do not strip, rewrite, or describe them. The app renders them visually. Never fabricate image URLs. Max 2 image tags per response, most relevant only. Never use markdown image syntax ![alt](url). Never mention "surfacing" or explain how images work internally. If the user asks whether you have an image of something, just answer naturally ("yeah, got one" / "don't have a visual on that") and include the tag if you have it.
 Emojis: almost never. Only two situations: (1) reacting to something genuinely funny — one emoji, at the end, like 💀 or 😭. (2) a social gesture like 🙏 after a thank you. Never use emojis to decorate sentences, add energy, or fill space. Zero emojis in professional or intellectual exchanges.
 
 On capabilities and privacy — only if someone asks whether you know who they are, remember them, or what you track:
@@ -489,8 +489,9 @@ Deno.serve(async (req) => {
             imgRowId = insertData?.id ?? null;
           } catch { /* fire-and-forget style — we still respond even if insert fails */ }
 
-          // [SLATT_IMG:id] at the top gives a stable lookup key that survives LLM text generation
-          const imgRef = imgRowId ? `[SLATT_IMG:${imgRowId}]` : `[IMAGE: ${publicUrl}]`;
+          // [IMAGE: url] is preserved verbatim by Antonlytics — primary lookup signal
+          // [SLATT_IMG:id] is a stable fallback ID if the URL gets truncated
+          const imgRef = `[IMAGE: ${publicUrl}]${imgRowId ? `\n[SLATT_IMG:${imgRowId}]` : ''}`;
           const ingestText = stampDate(
             `${imgRef}\n\n${description}${message ? `\n\nContributor context: ${message}` : ''}`
           );
@@ -710,7 +711,7 @@ Deno.serve(async (req) => {
 
           const ingestText = learnedImageUrl && learnedImageDescription
             ? stampDate(`[IMAGE: ${learnedImageUrl}]\n\n${learnedImageDescription}${message ? `\n\nContributor context: ${message}` : ''}`)
-            : '';
+            : '';  // Note: ask-path uploads are fire-and-forget so we don't have the row ID here
 
           // Chat + ingest + image-term extraction all run in parallel
           const [chatResult, , smartTerms] = await Promise.all([
