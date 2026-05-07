@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { supabase } from '@/lib/supabase';
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '@/lib/legal';
 import { LANGUAGES } from '@/lib/i18n';
@@ -108,6 +109,25 @@ export default function SignupScreen() {
         pathname: '/(auth)/verify',
         params: { email: email.trim(), type: 'signup' },
       });
+    }
+  };
+
+  const signInWithApple = async () => {
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      const { error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: credential.identityToken!,
+      });
+      if (error) Alert.alert('Sign up failed', error.message);
+    } catch (e: any) {
+      if (e.code === 'ERR_REQUEST_CANCELED') return;
+      Alert.alert('Sign up failed', e.message);
     }
   };
 
@@ -239,6 +259,23 @@ export default function SignupScreen() {
               {' '}{t('agreeAnd')}{' '}
               <Text style={s.legalLink} onPress={() => setLegalModal('privacy')}>{t('privacyPolicy')}</Text>.
             </Text>
+
+            {Platform.OS === 'ios' && (
+              <>
+                <View style={s.dividerRow}>
+                  <View style={s.dividerLine} />
+                  <Text style={s.dividerText}>or</Text>
+                  <View style={s.dividerLine} />
+                </View>
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={28}
+                  style={s.appleBtn}
+                  onPress={signInWithApple}
+                />
+              </>
+            )}
           </View>
 
           {/* ── Footer ── */}
@@ -350,6 +387,10 @@ const s = StyleSheet.create({
   fieldValid: { borderColor: 'rgba(48,209,88,0.5)' },
   input: { color: C.text, fontSize: 15, letterSpacing: 0.1 },
   errorTxt: { color: '#FF453A', fontSize: 12, marginTop: -6, marginLeft: 4 },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.12)' },
+  dividerText: { color: 'rgba(255,255,255,0.25)', fontSize: 12, fontWeight: '500' },
+  appleBtn: { height: 56, width: '100%' },
   btnOuter: { borderRadius: 28, overflow: 'hidden', marginTop: 4 },
   btn: { height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },

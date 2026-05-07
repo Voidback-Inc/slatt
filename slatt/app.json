@@ -15,6 +15,7 @@
       "bundleIdentifier": "com.voidback.slatt",
       "buildNumber": "6",
       "version": "1.5.0",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
