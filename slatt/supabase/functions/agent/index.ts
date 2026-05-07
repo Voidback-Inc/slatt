@@ -310,6 +310,7 @@ async function generateWithMemory(
   message: string,
   history: HistoryMessage[],
   memory: { entities: any[]; relationships: any[] },
+  isPro = false,
 ): Promise<{ response: string; memImgIds: string[] }> {
   // Scan raw memory JSON for any SLATT_IMG IDs stored in entity properties
   const memJson = JSON.stringify(memory);
@@ -350,8 +351,8 @@ async function generateWithMemory(
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1500,
+          model: isPro ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
+          max_tokens: isPro ? 1500 : 1024,
           system: systemPrompt + contextBlock,
           messages: msgs,
         }),
@@ -483,7 +484,7 @@ Deno.serve(async (req) => {
         const dupAgent = new Agent({ apiKey: ANTONLYTICS_API_KEY, projectId: ANTONLYTICS_PROJECT_ID });
         const dupMemory = await withTimeout(dupAgent.getMemory(chatMessage), 8000).catch(() => ({ entities: [], relationships: [] }));
         const { response: rawResp } = ANTHROPIC_API_KEY
-          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), chatMessage, history, dupMemory as any)
+          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), chatMessage, history, dupMemory as any, profile.tier === 'pro')
           : { response: "That image is already in the collective." };
         const { clean } = cleanResponse(rawResp);
         body = {
@@ -561,7 +562,7 @@ Deno.serve(async (req) => {
         ]);
 
         const { response: rawResp, memImgIds: imgMemIds } = ANTHROPIC_API_KEY
-          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), chatMessage, history, imgMemory as any)
+          ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), chatMessage, history, imgMemory as any, profile.tier === 'pro')
           : { response: analysis.ack, memImgIds: [] as string[] };
         const { clean, slattImgIds } = cleanResponse(rawResp);
         const allImgTagIds = [...new Set([...imgMemIds, ...slattImgIds])];
@@ -662,7 +663,7 @@ Deno.serve(async (req) => {
 
       // Claude generates the response with memory context — reliable system prompt following + SLATT_IMG tags
       const { response: rawResp, memImgIds } = ANTHROPIC_API_KEY
-        ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), message, history, memoryResult as any)
+        ? await generateWithMemory(ANTHROPIC_API_KEY, buildSystemPrompt(language), message, history, memoryResult as any, profile.tier === 'pro')
         : { response: '', memImgIds: [] as string[] };
       const { clean, slattImgIds } = cleanResponse(rawResp);
       const allImgTagIds = [...new Set([...memImgIds, ...slattImgIds])];
